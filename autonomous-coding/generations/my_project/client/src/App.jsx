@@ -194,7 +194,7 @@ function CompanionApp({ sharedAudioRef }) {
       // Pass activeModel so pipeline can apply per-model thinking timeout — #54
       sendMessage(text.trim(), convId, activeModel);
     },
-    [activeConvIdRef, sendMessage]
+    [activeConvIdRef, sendMessage, activeModel]
   );
 
   // ── Handle voice transcript ──────────────────────────────────────────────

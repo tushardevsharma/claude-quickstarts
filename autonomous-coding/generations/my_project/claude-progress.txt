@@ -1,6 +1,6 @@
 Digital Human AI Companion — Build Progress
 ============================================
-Date: 2026-03-18 (Sessions 4, 5, 6, 7, 8, 9, 10 update)
+Date: 2026-03-18 (Sessions 4, 5, 6, 7, 8, 9, 10, 11 update)
 Build Agent: Claude (Autonomous Coding Agent)
 
 PROJECT SUMMARY
@@ -68,6 +68,7 @@ Session 7 additions:   3 new → 96/100 passing (#54, #98, #99)
 Session 8 additions:   0 new → 96/100 passing (verification session only)
 Session 9 additions:   0 new → 96/100 passing (verification session only)
 Session 10 additions:  1 new → 97/100 passing (#21 Microphone Toggle Off)
+Session 11 additions:  0 new → 97/100 passing (quality audit + stale closure bug fix)
 
 CURRENT STATUS: 97/100 passing
 
@@ -200,6 +201,25 @@ UPDATED: client/src/components/Chat/TranscriptPanel.jsx
 
 UPDATED: client/src/App.jsx
   - Passes activeModel to sendMessage() for per-model timeout calculation
+
+SESSION 11 WORK (2026-03-18)
+-----------------------------
+Quality audit session — no new tests marked passing, but fixed a stale closure bug.
+
+BUG FIXED: client/src/App.jsx
+  - handleSend useCallback was missing `activeModel` in its dependency array.
+  - This caused the callback to capture a stale `activeModel` when the user
+    switches models. The wrong per-model thinking timeout would be applied to
+    the sendMessage call until some other dep triggered callback re-creation.
+  - Fix: added `activeModel` to deps: [activeConvIdRef, sendMessage, activeModel].
+
+VERIFIED STILL WORKING:
+  - Chat: "What is the square root of 144?" → Nova responded "That's 12." ✓
+  - Avatar idle blink animation between responses ✓
+  - Light/dark mode toggle ✓
+  - Mobile view (375×812): no overflow, correct layout ✓
+  - Settings panel: all 6 sections present and interactive ✓
+  - Zero console errors ✓
 
 SESSION 10 WORK (2026-03-18)
 -----------------------------
