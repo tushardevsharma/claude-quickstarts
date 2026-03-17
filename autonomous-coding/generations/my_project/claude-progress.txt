@@ -128,3 +128,87 @@ npm --prefix server start
 npm --prefix client run dev
 
 # Open http://localhost:5173
+
+---
+SPEC SYNC SESSION — 2026-03-17
+=================================
+Session Type: Sync-only (no implementation, no test changes)
+Agent: Claude Sonnet 4.6 (Spec Sync Agent)
+
+SUMMARY
+-------
+Synced feature_list.json with the updated app_spec.txt (v2.0).
+
+50 new features added (IDs 51–100), all with passes=false.
+spec_checksum updated to: ae9c1fadd9b31c78559953e9d0e57f5ba15d21e84f4b4f124276d12d307d8bb8
+
+FEATURES ADDED BY SPEC SECTION
+--------------------------------
+Phase 1.5 — Multi-Model Switching (§9.3, §11):
+  IDs 51–61 (11 features)
+  - GET /api/models endpoint
+  - ModelPicker dropdown in Settings
+  - Model indicator badge on avatar viewport (blue/green/amber)
+  - Per-model thinking timeout (Haiku 3s, Sonnet 5s, Opus 8s)
+  - WebSocket model_switch message (client→server)
+  - WebSocket model_switched ACK (server→client)
+  - Mid-conversation model switch (new messages use new model)
+  - Model switch scope "all_new_conversations" DB persistence
+  - DB schema: model_id on messages, active_model on conversations
+  - Background task model pinned to Haiku
+  - Transcript model badge for non-default model turns
+
+New Settings §9.1 (not previously covered):
+  IDs 62–73 (12 features)
+  - Active model dropdown, model switching scope toggle, show model indicator toggle
+  - TTS voice selection, speech rate slider, avatar character selector
+  - Idle animation intensity, default input mode, push-to-talk toggle
+  - Caption font size, response style, store conversation history toggle
+
+API Endpoints §12:
+  IDs 74–78 (5 features)
+  - POST /api/chat/stream, POST /api/chat/interrupt
+  - GET /api/personas, GET /api/settings, PUT /api/settings
+
+Error Handling §13:
+  IDs 79–85 (7 features)
+  - 429 rate limit recovery, TTS audio gap, tab backgrounded
+  - WebSocket auto-reconnect, audio context suspended
+  - STT service down fallback, generation ID stale audio prevention
+
+Context Window §8.2:
+  IDs 86–87 (2 features)
+  - Rolling window context (last 20 messages in full)
+  - Periodic conversation summary generation via Haiku
+
+Avatar Expressions §4.2:
+  IDs 88–90 (3 features)
+  - Surprised expression, Empathetic expression, sentiment-based triggering
+
+State Indicators §7.2:
+  IDs 91–93 (3 features)
+  - Interrupted state, Error state (red), Connecting state (gray spinner)
+
+Interruption Details §5:
+  IDs 94–97 (4 features)
+  - Partial response stored in DB with was_interrupted flag
+  - 100ms audio fade-out on interrupt
+  - Empty-transcript-after-interrupt recovery
+  - Interrupt rate limiting (min 1s between events)
+
+Live Captions §7.3:
+  ID 98 (1 feature)
+  - Word-by-word captions synchronized to TTS audio playback
+
+Latency Optimizations §6.2:
+  IDs 99–100 (2 features)
+  - Pre-warm TTS WebSocket connection
+  - Gapless audio chunk overlap
+
+TOTALS
+------
+- Features before sync: 50
+- Features after sync:  100
+- New entries added:    50
+- spec_checksum:        updated
+- Existing entries:     unchanged (no edits, no deletions)

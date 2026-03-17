@@ -20,6 +20,7 @@ ALLOWED_COMMANDS = {
     "tail",
     "wc",
     "grep",
+    "shasum",
     # File operations (agent uses SDK tools for most file ops, but cp/mkdir needed occasionally)
     "cp",
     "mkdir",
