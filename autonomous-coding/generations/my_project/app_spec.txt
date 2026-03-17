@@ -1,0 +1,1049 @@
+# Digital Human AI Companion — Product Requirements Document & Technical Feature Spec
+
+**Version:** 1.0 (Draft)
+**Author:** Tushar (Solo Developer)
+**Date:** March 2026
+**Status:** Pre-development
+
+---
+
+## 1. Product Overview
+
+### 1.1 What This Is
+
+A browser-based AI companion application that replaces the traditional chat window with a 2D animated talking head. The user converses with a lifelike animated portrait — powered by Claude as the reasoning engine, a TTS service for voice synthesis, and a client-side lip-sync/animation layer for visual output. The companion remembers past conversations and maintains personality continuity across sessions.
+
+### 1.2 What This Is NOT
+
+- Not a photorealistic real-time 3D avatar (that's v3+ territory)
+- Not a voice-only assistant (the face is the core differentiator)
+- Not a multi-user or team product (single-user companion)
+- Not a mobile-native app in v1 (browser-first, mobile-responsive later)
+
+### 1.3 Core Value Proposition
+
+Text chat with AI feels transactional. A face that listens, thinks, and speaks creates a fundamentally different interaction — one that feels more like talking to someone than typing at something. The goal is to make the AI feel *present*.
+
+### 1.4 Success Criteria for v1
+
+| Metric | Target |
+|--------|--------|
+| End-to-end latency (user finishes speaking → avatar starts responding) | < 2 seconds |
+| Avatar lip-sync perceptual accuracy | Convincing at arm's length (no uncanny valley) |
+| Interruption recovery time | < 500ms (avatar stops, system listens) |
+| Conversation persistence | Full history across browser sessions |
+| Browser support | Chrome 110+, Firefox 115+, Safari 17+ |
+| Session duration without degradation | 30+ minutes continuous |
+
+---
+
+## 2. System Architecture
+
+### 2.1 High-Level Pipeline
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                              BROWSER CLIENT                                  │
+│                                                                              │
+│  ┌─────────────┐    ┌──────────────┐    ┌──────────────┐    ┌────────────┐  │
+│  │  Microphone  │───▸│  VAD + STT   │───▸│   Session    │───▸│  Text      │  │
+│  │  (WebRTC)    │    │  (Deepgram)  │    │   Manager    │    │  Input     │  │
+│  └─────────────┘    └──────────────┘    │              │    │  (fallback)│  │
+│                                          │  Manages     │    └────────────┘  │
+│  ┌─────────────┐    ┌──────────────┐    │  state,      │                    │
+│  │  2D Avatar   │◂──│  Lip-Sync    │◂──│  history,    │                    │
+│  │  Canvas      │    │  Engine      │    │  interrupts  │                    │
+│  │  (Canvas2D/  │    │  (Rhubarb or │    │              │                    │
+│  │   WebGL)     │    │   viseme map)│    └──────┬───────┘                    │
+│  └─────────────┘    └──────┬───────┘           │                            │
+│                            │                    │                            │
+│                     ┌──────┴───────┐            │                            │
+│                     │  Audio       │            │                            │
+│                     │  Playback    │            │                            │
+│                     │  (Web Audio  │            │                            │
+│                     │   API)       │            │                            │
+│                     └──────────────┘            │                            │
+└─────────────────────────────────────────────────┼────────────────────────────┘
+                                                  │ SSE / WebSocket
+                                                  │
+┌─────────────────────────────────────────────────┼────────────────────────────┐
+│                          BACKEND SERVER                                       │
+│                                                  │                            │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────┴───────┐    ┌────────────┐  │
+│  │  Claude API   │◂──│  Orchestrator │◂──│  API Gateway  │   │  SQLite DB │  │
+│  │  (Streaming)  │──▸│  Service      │──▸│  (Express)    │   │  (history, │  │
+│  └──────────────┘    │              │    └───────────────┘   │  settings)  │  │
+│                      │  Chunks text │                        └────────────┘  │
+│  ┌──────────────┐    │  into TTS-   │                                        │
+│  │  TTS Service  │◂──│  sized       │                                        │
+│  │  (ElevenLabs  │──▸│  segments    │                                        │
+│  │   WebSocket)  │    └──────────────┘                                        │
+│  └──────────────┘                                                            │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 2.2 Component Responsibilities
+
+**Browser Client:**
+- Captures microphone input via WebRTC
+- Runs Voice Activity Detection (VAD) to detect speech start/end
+- Streams audio to STT service for transcription
+- Renders the 2D avatar on a `<canvas>` element
+- Plays TTS audio via Web Audio API
+- Drives lip-sync animation from audio analysis or viseme timestamps
+- Manages UI state (Listening, Thinking, Speaking, Idle)
+- Handles interruption detection (user speaks while avatar is speaking)
+
+**Backend Server (Node.js/Express):**
+- Proxies requests to Claude API with streaming
+- Manages conversation history in SQLite
+- Orchestrates the text-chunking pipeline (splits Claude's streaming output into TTS-friendly segments)
+- Proxies or coordinates TTS API calls
+- Serves the frontend static assets
+- Manages user settings, persona configuration
+
+### 2.3 Why This Split?
+
+A legitimate question: why not do everything client-side?
+
+- **API keys**: Claude API key and TTS API key must not be exposed to the browser.
+- **Conversation history**: SQLite on the server is simpler and more reliable than IndexedDB for structured queries.
+- **Text chunking**: Splitting streaming LLM output into sentence-level TTS chunks is stateful logic that benefits from server-side buffering.
+- **Future extensibility**: Adding a second client (mobile app, Electron) becomes trivial if the server already owns the pipeline.
+
+**Counter-argument**: For a solo-developer personal companion, you *could* run everything client-side with a local proxy and skip the server. If you want to go that route, flag it — the spec can be simplified.
+
+---
+
+## 3. The Multimodal Pipeline (Detailed)
+
+This is the hardest part of the system. Every millisecond matters.
+
+### 3.1 Input Path: User → Text
+
+**Option A: Voice Input (primary)**
+
+```
+Microphone → VAD → STT (streaming) → Transcript → Send to backend
+```
+
+| Stage | Technology | Latency Budget | Notes |
+|-------|-----------|---------------|-------|
+| Microphone capture | WebRTC getUserMedia | ~0ms | Standard browser API |
+| Voice Activity Detection | @ricky0123/vad-web (Silero VAD) | ~30ms | Client-side, ONNX model. Detects speech start/end. Critical for knowing *when* the user has finished speaking. |
+| Speech-to-Text | Deepgram Nova-2 (streaming WebSocket) | ~300ms final transcript | Streams interim results. Use `endpointing=300` for fast turn detection. Alternative: Whisper (higher latency, free). |
+| Transcript finalization | — | ~100ms after speech end | Wait for Deepgram's `is_final` flag before sending to Claude. |
+
+**Total input latency: ~400-500ms** from user stopping speech to transcript ready.
+
+**Option B: Text Input (fallback)**
+
+Standard textarea with Enter-to-send. No latency concerns. Always available as fallback when microphone is unavailable or user prefers typing.
+
+**VAD Configuration (Critical):**
+
+The VAD determines when the user has *stopped* speaking. Too aggressive = cuts off mid-sentence. Too conservative = adds unnecessary delay.
+
+```javascript
+// Recommended Silero VAD settings for companion use case
+{
+  positiveSpeechThreshold: 0.8,  // High confidence needed to trigger "speaking"
+  negativeSpeechThreshold: 0.3,  // Lower threshold to detect end of speech
+  redemptionFrames: 8,           // ~240ms grace period before declaring "done"
+  preSpeechPadFrames: 3,         // Capture ~90ms before speech detected
+  minSpeechFrames: 5             // Minimum ~150ms to count as speech (ignore clicks, coughs)
+}
+```
+
+### 3.2 Processing Path: Text → Claude → Chunked Text
+
+```
+User transcript → Backend API → Claude (streaming) → Sentence Splitter → TTS Queue
+```
+
+**The Sentence Splitter is the key innovation for low latency.**
+
+Claude streams tokens one at a time. TTS engines need at least a sentence to produce natural-sounding speech. The sentence splitter buffers incoming tokens and emits complete sentences as soon as they're detected.
+
+```javascript
+// Pseudocode for the sentence splitter
+class SentenceSplitter {
+  constructor() {
+    this.buffer = '';
+    this.sentenceEnders = /[.!?]\s/;  // Period/exclamation/question followed by space
+    this.minChunkLength = 20;          // Don't emit fragments shorter than ~4 words
+  }
+
+  ingest(token) {
+    this.buffer += token;
+
+    // Check if buffer contains a complete sentence
+    const match = this.buffer.match(this.sentenceEnders);
+    if (match && this.buffer.length >= this.minChunkLength) {
+      const splitIndex = match.index + 1;
+      const sentence = this.buffer.slice(0, splitIndex).trim();
+      this.buffer = this.buffer.slice(splitIndex).trim();
+      return sentence;  // Emit to TTS queue
+    }
+    return null;  // Keep buffering
+  }
+
+  flush() {
+    // Called when Claude finishes streaming — emit whatever remains
+    if (this.buffer.trim().length > 0) {
+      const remaining = this.buffer.trim();
+      this.buffer = '';
+      return remaining;
+    }
+    return null;
+  }
+}
+```
+
+**Edge cases to handle:**
+- Abbreviations ("Dr. Smith", "U.S.A.") — shouldn't trigger sentence split. Use a common abbreviation list.
+- Numbered lists ("1. First item") — split on the newline, not the period.
+- Code blocks — if Claude generates code, don't TTS it. Detect code fences and skip to a summary ("I've written some code for that").
+- Very long sentences — if buffer exceeds ~200 chars without a sentence ender, force-split at the nearest comma or conjunction.
+
+### 3.3 Output Path: Chunked Text → Voice → Face
+
+```
+Sentence chunk → TTS API (streaming) → Audio buffer → Web Audio playback + Lip-sync
+```
+
+| Stage | Technology | Latency Budget | Notes |
+|-------|-----------|---------------|-------|
+| TTS synthesis | ElevenLabs Streaming API (WebSocket) | ~300-500ms for first audio chunk | See TTS Provider Analysis below |
+| Audio buffering | Server-side buffer | ~50ms | Small buffer to prevent stuttering |
+| Audio delivery | WebSocket binary frames to client | ~20ms | Raw PCM or mp3 chunks |
+| Audio playback | Web Audio API (AudioContext) | ~10ms | Schedule chunks for gapless playback |
+| Lip-sync | Viseme extraction from audio energy | ~0ms (real-time) | See Lip-Sync Engine below |
+| Avatar animation | Canvas2D / requestAnimationFrame | ~16ms (60fps) | Mouth shape + idle animations |
+
+**Total output latency (first words spoken): ~800-1200ms** from sentence ready to avatar speaking.
+
+**Combined end-to-end: ~1.5-2.5 seconds** from user finishing speech to avatar starting to respond. This is within the target.
+
+### 3.4 TTS Provider Analysis
+
+| Provider | Streaming | First-chunk Latency | Quality | Cost (per 1K chars) | WebSocket API | Recommendation |
+|----------|-----------|-------------------|---------|--------------------|--------------|----|
+| ElevenLabs | Yes (WebSocket) | ~300-500ms | Excellent | ~$0.30 (Starter) | Yes | **Primary choice** — best streaming support, most natural voices, WebSocket API enables lowest latency |
+| PlayHT | Yes (gRPC/WS) | ~400-700ms | Very good | ~$0.20 | Yes | Good fallback. Slightly higher latency but competitive pricing. |
+| Azure Neural TTS | Yes (WebSocket) | ~200-400ms | Good | ~$0.16 | Yes | Lowest latency, but voice quality is noticeably more "synthetic" than ElevenLabs. Good for cost optimization later. |
+| Deepgram Aura | Yes | ~250ms | Good | ~$0.015 | Yes | Cheapest by far. Newer, less voice variety. Worth testing. |
+| Local (Piper/Coqui) | N/A (runs locally) | ~100-200ms | Moderate | Free | N/A | No API cost, but quality gap is noticeable. Consider for offline mode only. |
+
+**Recommendation:** Start with ElevenLabs for v1 (best quality + streaming). Abstract the TTS layer behind an interface so you can swap providers without rewriting the pipeline. For development/testing, use a free tier or mock the TTS with pre-recorded audio to save costs.
+
+### 3.5 Lip-Sync Engine
+
+**Approach: Audio-energy-driven mouth shapes (v1)**
+
+For a 2D portrait, you don't need phoneme-level lip sync. A simpler approach works well:
+
+1. **Analyze audio energy** in real-time using Web Audio API's `AnalyserNode`
+2. **Map energy levels to mouth openness** (0 = closed, 1 = fully open)
+3. **Interpolate between 4-6 mouth shapes** (visemes) drawn as SVG overlays or sprite sheet frames
+4. **Add smoothing** to prevent jittery mouth movement
+
+```javascript
+// Simplified lip-sync from audio energy
+class LipSyncEngine {
+  constructor(audioContext) {
+    this.analyser = audioContext.createAnalyser();
+    this.analyser.fftSize = 256;
+    this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+  }
+
+  // Call this every animation frame
+  getMouthOpenness() {
+    this.analyser.getByteFrequencyData(this.dataArray);
+    // Focus on speech frequencies (300-3000 Hz)
+    const speechBins = this.dataArray.slice(5, 50);
+    const energy = speechBins.reduce((a, b) => a + b, 0) / speechBins.length / 255;
+    // Apply smoothing (exponential moving average)
+    this.smoothedEnergy = this.smoothedEnergy * 0.7 + energy * 0.3;
+    return Math.min(this.smoothedEnergy * 2.5, 1.0);  // Scale to 0-1
+  }
+}
+```
+
+**Mouth shapes (minimum viable set):**
+
+| Shape | Trigger | Description |
+|-------|---------|-------------|
+| Closed | energy < 0.05 | Lips together, neutral |
+| Slightly open | energy 0.05-0.2 | Small opening, relaxed jaw |
+| Medium open | energy 0.2-0.5 | Visible teeth, mid-jaw |
+| Wide open | energy 0.5-0.8 | Full open, vowel sounds |
+| Round | (optional, v2) | "O" shape for specific phonemes |
+| Wide | (optional, v2) | "E/I" shape, stretched lips |
+
+**Upgrade path (v2): Viseme-based lip sync.** ElevenLabs' API can return viseme timestamps alongside audio. These map to specific mouth shapes per phoneme, giving much more accurate lip movement. This is a drop-in upgrade — same mouth shapes, better timing data.
+
+---
+
+## 4. The Avatar System
+
+### 4.1 Portrait Rendering
+
+**Approach: Layered 2D composition on HTML Canvas**
+
+The avatar is composed of layers, each independently animatable:
+
+```
+Layer 7: Foreground effects (optional glow, particles)
+Layer 6: Hair overlay (top portion that overlaps face)
+Layer 5: Mouth shapes (sprite sheet, swapped per frame)
+Layer 4: Eyes + eyebrows (sprite sheet for blink, expressions)
+Layer 3: Base face (static portrait image)
+Layer 2: Neck/shoulders (static or subtle breathing motion)
+Layer 1: Background (gradient, scene, or blur)
+```
+
+**Why layers, not a single animated image?**
+- You can change expressions without regenerating the entire face
+- Mouth animation is decoupled from eye animation
+- Idle animations (breathing, micro-movements) run independently
+- Much lighter than a full video or 3D render
+
+**Asset requirements for v1:**
+- 1 base portrait image (can be AI-generated via Stable Diffusion, Midjourney, or hand-drawn)
+- 1 sprite sheet for mouth shapes (6 frames minimum)
+- 1 sprite sheet for eye states (open, half-closed, closed for blink)
+- 2-3 eyebrow positions (neutral, raised, furrowed)
+
+### 4.2 Expression States
+
+The avatar has discrete emotional states that affect multiple layers simultaneously:
+
+| State | Eyes | Eyebrows | Mouth (base) | Head Tilt | Trigger |
+|-------|------|----------|-------------|-----------|---------|
+| **Idle** | Normal, blinking every 3-5s | Neutral | Closed, slight smile | Occasional micro-movement | No active interaction |
+| **Listening** | Slightly wider, focused | Slightly raised | Closed, neutral | Slight tilt toward mic indicator | VAD detects user speech |
+| **Thinking** | Normal or slightly narrowed | Slight furrow | Closed, neutral | Slight downward tilt | Claude is generating (before first TTS chunk) |
+| **Speaking** | Normal, natural blinks | Matches sentiment | Driven by lip-sync engine | Subtle movement | TTS audio playing |
+| **Surprised** | Wide | Raised | Open | None | Detected exclamation or unexpected input |
+| **Empathetic** | Soft, slightly narrowed | Slightly raised inner | Slight closed-mouth smile | Slight tilt | Detected emotional/personal topic |
+
+**Sentiment detection (lightweight, v1):** Don't over-engineer this. Use keyword matching on Claude's output for basic sentiment:
+- Keywords like "sorry", "unfortunately", "I understand" → Empathetic
+- Keywords like "great!", "excellent", "that's interesting" → Positive/Engaged
+- Questions → Listening-adjacent micro-expression
+- Default → Neutral Speaking
+
+**v2 upgrade:** Ask Claude to include a sentiment tag in its responses via system prompt (e.g., `[mood:empathetic]`), stripped before TTS.
+
+### 4.3 Idle Animation System
+
+A static face looks dead. Idle animations are essential for the "presence" feeling:
+
+```javascript
+class IdleAnimator {
+  constructor() {
+    this.timers = {
+      blink: { interval: [2500, 5000], duration: 150 },     // Random interval, fast blink
+      microShift: { interval: [3000, 8000], amplitude: 2 },  // 2px head micro-movements
+      breathing: { frequency: 0.2, amplitude: 3 },           // Subtle vertical oscillation
+      gazeShift: { interval: [4000, 10000], amplitude: 5 },  // Eyes shift slightly
+    };
+  }
+
+  update(deltaTime) {
+    // Each timer runs independently
+    // Blink: quick close-open cycle (3 frames)
+    // MicroShift: slight random translation of all layers
+    // Breathing: sine-wave vertical offset on shoulder/chest layers
+    // GazeShift: pupil position offset within eye sprites
+  }
+}
+```
+
+**Critical: Idle animations must be suppressed or reduced during Speaking state** to avoid conflicting with lip-sync driven movements.
+
+---
+
+## 5. Interruptibility (Barge-In)
+
+This is one of the hardest UX problems in conversational AI. The user should be able to cut off the avatar mid-sentence, just like interrupting a real person.
+
+### 5.1 Interrupt Detection
+
+```
+User starts speaking (VAD triggers)
+  → While avatar is in Speaking state?
+    → YES: This is an interrupt (barge-in)
+    → NO: Normal turn start
+```
+
+### 5.2 Interrupt Handling Sequence
+
+```
+1. VAD detects user speech during avatar Speaking state
+2. Client immediately:
+   a. Stops TTS audio playback (fade out over ~100ms, not hard cut)
+   b. Transitions avatar to Listening state
+   c. Sends "interrupt" signal to backend via WebSocket
+3. Backend immediately:
+   a. Aborts in-flight Claude API stream (close the SSE connection)
+   b. Discards any queued TTS chunks not yet sent
+   c. Records the partial response in conversation history
+      (marks it as interrupted, stores what was actually spoken)
+   d. Waits for new user transcript
+4. User finishes speaking (VAD end-of-speech)
+5. Transcript sent to backend
+6. Backend sends new request to Claude, including:
+   - Full conversation history
+   - The interrupted partial response (so Claude knows what it already said)
+   - Implicit context: Claude can continue where it left off or pivot
+```
+
+### 5.3 Edge Cases
+
+| Scenario | Handling |
+|----------|---------|
+| User coughs/laughs briefly while avatar speaks | **Don't interrupt.** Use `minSpeechFrames` in VAD (≥150ms of speech required). Short noise bursts are filtered. |
+| User says "mm-hmm" / "yeah" while avatar speaks | **Don't interrupt.** These are backchannels, not interrupts. v1: treat any speech >500ms during Speaking as interrupt. v2: classify backchannel vs interrupt with a small model. |
+| User interrupts, then doesn't say anything | After VAD end-of-speech, if transcript is empty or near-empty, resume previous response if possible. Fallback: avatar says "Sorry, did you want to say something?" |
+| Rapid back-and-forth interrupts | Rate-limit interrupt handling. Minimum 1 second between interrupt events. |
+| Network delay causes stale audio to play after interrupt | Client-side audio queue must be clearable. Use a generation ID — when interrupt fires, increment the ID and ignore any audio chunks with the old ID. |
+
+### 5.4 Audio Fade-Out on Interrupt
+
+Hard-cutting audio sounds jarring. Apply a quick fade:
+
+```javascript
+function interruptAudio(audioSource, gainNode) {
+  const now = audioSource.context.currentTime;
+  gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+  gainNode.gain.linearRampToValueAtTime(0, now + 0.1);  // 100ms fade
+  setTimeout(() => audioSource.stop(), 120);
+}
+```
+
+---
+
+## 6. Latency Optimization Strategies
+
+### 6.1 The Streaming Pipeline (Overlap is Everything)
+
+The key insight: **never wait for one stage to fully complete before starting the next.**
+
+```
+Time →
+Claude:     [token][token][token][token][sentence!][token][token][sentence!][done]
+Splitter:   [................buffering..][emit S1  ][......buffering......][emit S2 + flush]
+TTS:                                     [S1 synthesizing...][S1 audio ready][S2 synthesizing...]
+Audio:                                                        [S1 playing...........][S2 playing..]
+Lip-sync:                                                     [animating from S1 audio][from S2..]
+```
+
+The avatar starts speaking sentence 1 while Claude is still generating sentence 2. The user perceives near-instant response.
+
+### 6.2 Specific Optimizations
+
+| Optimization | Impact | Complexity |
+|-------------|--------|-----------|
+| **Pre-warm TTS WebSocket** — keep connection open, don't reconnect per request | -200ms per turn | Low |
+| **Pre-warm Claude API** — send system prompt in advance, keep connection pool | -100ms per turn | Low |
+| **Speculative first sentence** — for common patterns ("Sure, I can help with that"), pre-synthesize a few generic openers | -500ms for first response | Medium |
+| **Audio chunk overlap** — start playing chunk N while chunk N+1 is still synthesizing | Eliminates inter-sentence gaps | Medium |
+| **STT interim results** — show "I heard: ..." while waiting for final transcript, so user knows they were understood | Perceived latency reduction (psychological) | Low |
+| **Thinking expression** — avatar shows "thinking" face immediately when user stops speaking, before any response arrives | Perceived latency reduction (psychological) | Low |
+| **Client-side TTS cache** — cache audio for repeated phrases ("Let me think about that", "That's a great question") | -300ms for cached phrases | Low |
+
+### 6.3 Latency Budget Breakdown (Target: <2s e2e)
+
+```
+User stops speaking:                         0ms
+VAD end-of-speech detection:               +200ms  (configured endpointing)
+STT final transcript:                      +300ms  (Deepgram processing)
+Network to backend:                         +30ms  (local/nearby server)
+Claude first tokens:                       +400ms  (API latency to first token)
+Sentence splitter buffers first sentence:  +300ms  (depends on sentence length)
+TTS first audio chunk:                     +400ms  (ElevenLabs streaming)
+Audio playback starts:                      +20ms  (Web Audio scheduling)
+                                          -------
+Total:                                    ~1650ms
+```
+
+This is within the 2-second target. The main variables are Claude's time-to-first-token and TTS synthesis speed — both are provider-dependent and will improve over time.
+
+---
+
+## 7. UI/UX Design
+
+### 7.1 Layout
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  ┌─────┐                                    ┌──┐ ┌──┐ ┌──┐  │
+│  │ ☰   │    Digital Human Companion         │🎤│ │⚙️│ │🌙│  │
+│  └─────┘                                    └──┘ └──┘ └──┘  │
+├──────────────────────────────────────────────────────────────┤
+│                                                              │
+│                                                              │
+│                    ┌──────────────────┐                       │
+│                    │                  │                       │
+│                    │                  │                       │
+│                    │    AVATAR        │                       │
+│                    │    VIEWPORT      │                       │
+│                    │    (4:3 or 1:1)  │                       │
+│                    │                  │                       │
+│                    │                  │                       │
+│                    └──────────────────┘                       │
+│                                                              │
+│                    ┌──────────────────┐                       │
+│                    │  State Indicator │                       │
+│                    │  "Listening..."  │                       │
+│                    └──────────────────┘                       │
+│                                                              │
+│              ┌─────────────────────────────┐                 │
+│              │ Transcript / captions area  │                 │
+│              │ (scrollable, collapsible)   │                 │
+│              └─────────────────────────────┘                 │
+│                                                              │
+├──────────────────────────────────────────────────────────────┤
+│  ┌──────────────────────────────────────────────────┐  ┌──┐ │
+│  │  Type a message...                               │  │▶ │ │
+│  └──────────────────────────────────────────────────┘  └──┘ │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### 7.2 State Indicators
+
+The avatar's state must be communicated through both the face and explicit UI:
+
+| System State | Avatar Expression | UI Indicator | Accent Color |
+|-------------|-------------------|-------------|-------------|
+| **Idle** | Relaxed, blinking, micro-movements | None (or subtle "Ready" text) | None |
+| **Listening** | Attentive, eyes slightly wider, head tilted | Pulsing microphone icon + "Listening..." | Blue |
+| **Processing** | Thoughtful, eyes slightly narrowed | Animated dots + "Thinking..." | Amber |
+| **Speaking** | Natural, lip-synced, appropriate expression | Waveform visualization + "Speaking..." | Green |
+| **Interrupted** | Brief surprised look → transitions to Listening | Quick flash → "Listening..." | Blue |
+| **Error** | Confused/concerned expression | Error message with retry | Red |
+| **Connecting** | Neutral, waiting | "Connecting..." spinner | Gray |
+
+### 7.3 Transcript Panel
+
+Below the avatar, a scrollable transcript shows the conversation in text form. This serves multiple purposes:
+- Accessibility (deaf/hard-of-hearing users)
+- Verification (user can confirm what the AI said)
+- Reference (scroll back to earlier parts of the conversation)
+- Fallback (if audio fails, conversation still works)
+
+The transcript should be **collapsible** — the primary experience is the face + voice, not reading text. But it must always be available.
+
+**Live captions during Speaking state:** Text appears word-by-word, synchronized with audio playback (not with Claude's generation speed, which is faster).
+
+### 7.4 Controls
+
+| Control | Location | Behavior |
+|---------|----------|----------|
+| Microphone toggle | Header bar | Mute/unmute mic. Visual indicator when active. |
+| Text input | Bottom bar | Always visible as fallback. Enter to send. |
+| Settings gear | Header bar | Opens settings panel (see Section 9) |
+| Theme toggle | Header bar | Light/dark mode |
+| Volume slider | Settings or header | TTS playback volume |
+| Conversation history | Sidebar (hamburger menu) | Past conversations list |
+| Stop button | Replaces send button during Speaking | Stops avatar mid-response (same as interrupt) |
+
+### 7.5 Responsive Behavior
+
+| Breakpoint | Layout Change |
+|-----------|--------------|
+| Desktop (>1024px) | Avatar centered, transcript beside or below, generous whitespace |
+| Tablet (768-1024px) | Avatar fills more width, transcript below |
+| Mobile (<768px) | Avatar fills top half, transcript bottom half, text input as bottom sheet. Hamburger menu for settings/history. |
+
+---
+
+## 8. Conversation Management & Persistence
+
+### 8.1 Database Schema
+
+```sql
+-- Minimal schema for v1. Extend as needed.
+
+CREATE TABLE conversations (
+    id TEXT PRIMARY KEY,           -- UUID
+    title TEXT,                    -- Auto-generated from first exchange
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    model TEXT DEFAULT 'claude-sonnet-4-5-20250929',
+    persona_id TEXT,               -- FK to personas table
+    is_archived INTEGER DEFAULT 0,
+    summary TEXT                   -- Periodic conversation summary for context window management
+);
+
+CREATE TABLE messages (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    role TEXT NOT NULL,             -- 'user', 'assistant', 'system'
+    content TEXT NOT NULL,          -- Full text content
+    audio_duration_ms INTEGER,      -- How long the TTS audio was (for assistant messages)
+    was_interrupted INTEGER DEFAULT 0,  -- Was this response cut short?
+    interrupted_at_char INTEGER,    -- Character position where interrupt occurred
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id)
+);
+
+CREATE TABLE personas (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,             -- Display name for the avatar
+    system_prompt TEXT,             -- Custom system prompt defining personality
+    voice_id TEXT,                  -- TTS voice identifier
+    avatar_asset_pack TEXT,         -- Path to avatar sprite sheets
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE settings (
+    key TEXT PRIMARY KEY,
+    value TEXT                      -- JSON-encoded settings values
+);
+```
+
+### 8.2 Context Window Management
+
+Claude has a finite context window. For a companion that remembers across long conversations, you need a strategy:
+
+**Approach: Rolling window + periodic summaries**
+
+1. Keep the last N messages (e.g., 20) in full.
+2. For older messages, store a summary (generated by Claude itself via a background call).
+3. On each new request, send: system prompt + conversation summary + last 20 messages.
+4. When conversation exceeds ~50 messages, trigger a summary of the oldest batch.
+
+```
+Context sent to Claude:
+┌─────────────────────────────────┐
+│ System prompt (persona)          │
+│ Conversation summary (older)     │  ← Generated periodically
+│ Message 81 (user)                │
+│ Message 82 (assistant)           │  ← Last 20 messages in full
+│ ...                              │
+│ Message 100 (user) ← current    │
+└─────────────────────────────────┘
+```
+
+### 8.3 Conversation Title Generation
+
+Auto-generate after the first user-assistant exchange. Send a cheap, fast request to Claude:
+
+```
+"Summarize this conversation start in 3-5 words as a title: [first exchange]"
+```
+
+Use the cheapest model (Haiku) for this — it's a background task.
+
+---
+
+## 9. Settings & Configuration
+
+### 9.1 User-Facing Settings
+
+| Category | Setting | Type | Default |
+|----------|---------|------|---------|
+| **Voice** | TTS voice selection | Dropdown | Provider default |
+| **Voice** | Speech rate | Slider (0.5x-2.0x) | 1.0x |
+| **Voice** | Volume | Slider (0-100) | 80 |
+| **Avatar** | Avatar character | Selector (from available personas) | Default companion |
+| **Avatar** | Idle animation intensity | Slider (subtle-lively) | Medium |
+| **Input** | Default input mode | Toggle (voice/text) | Voice |
+| **Input** | Push-to-talk vs always-on | Toggle | Always-on |
+| **Display** | Theme | Light/Dark/Auto | Auto |
+| **Display** | Show transcript | Toggle | On |
+| **Display** | Caption font size | Slider | Medium |
+| **AI** | Model | Dropdown | claude-sonnet-4-5 |
+| **AI** | Response style (verbose/concise) | Toggle | Concise |
+| **Privacy** | Store conversation history | Toggle | On |
+| **Privacy** | Clear all history | Button | — |
+
+### 9.2 Persona Configuration
+
+The companion's personality is defined by a persona config:
+
+```json
+{
+  "id": "default-companion",
+  "name": "Nova",
+  "system_prompt": "You are Nova, a warm and thoughtful AI companion...",
+  "voice_id": "elevenlabs_voice_id_here",
+  "avatar_assets": "/assets/personas/nova/",
+  "traits": {
+    "formality": 0.3,
+    "humor": 0.6,
+    "verbosity": 0.4,
+    "empathy": 0.8
+  },
+  "speech_patterns": {
+    "max_sentence_length": 25,
+    "use_filler_words": true,
+    "thinking_phrases": ["Hmm, let me think about that...", "That's interesting..."]
+  }
+}
+```
+
+**Speech patterns matter for TTS naturalness.** A system prompt that encourages shorter sentences, natural pauses, and conversational tone will produce better TTS output than one that generates essay-style paragraphs.
+
+---
+
+## 10. Technology Stack (Concrete)
+
+### 10.1 Frontend
+
+| Concern | Technology | Justification |
+|---------|-----------|--------------|
+| Framework | React + Vite | Fast dev cycle, component model fits layered avatar |
+| Styling | Tailwind CSS | Rapid prototyping, dark mode built-in |
+| Canvas rendering | HTML5 Canvas2D | Simpler than WebGL for 2D sprite composition. Sufficient for layered portrait. |
+| Audio playback | Web Audio API | Required for AnalyserNode (lip-sync) and precise scheduling |
+| Audio capture | WebRTC getUserMedia | Standard mic access |
+| VAD | @ricky0123/vad-web | Client-side Silero VAD, no server round-trip |
+| WebSocket client | Native WebSocket API | For TTS audio streaming and real-time events |
+| State management | React Context + useReducer | Sufficient for single-user app. No Redux needed. |
+| Routing | React Router | Minimal: / (main), /settings, /history |
+
+### 10.2 Backend
+
+| Concern | Technology | Justification |
+|---------|-----------|--------------|
+| Runtime | Node.js + Express | Familiar, good WebSocket support |
+| Database | SQLite (better-sqlite3) | Zero-config, single file, sufficient for single-user |
+| Claude integration | @anthropic-ai/sdk | Official SDK, streaming support |
+| TTS proxy | ElevenLabs WebSocket API | Server-side to protect API key |
+| WebSocket server | ws (npm package) | Lightweight, handles audio streaming + events |
+| API key management | dotenv + file-based | Read from /tmp/api-key or .env |
+
+### 10.3 External Services
+
+| Service | Purpose | Cost (estimate for personal use) |
+|---------|---------|----------------------------------|
+| Claude API (Sonnet) | Conversation intelligence | ~$3/M input tokens, ~$15/M output tokens. Personal use: $5-20/month |
+| ElevenLabs | Text-to-speech | Free tier: 10K chars/month. Starter: $5/month (30K chars). Personal use: $5-22/month |
+| Deepgram | Speech-to-text | Free tier: $200 credit. Pay-as-go: $0.0043/min. Personal use: $1-5/month |
+
+**Total estimated monthly cost: $10-45/month** depending on usage intensity.
+
+---
+
+## 11. Implementation Phases
+
+### Phase 1: Core Pipeline (Weeks 1-3) — THE ONLY THING THAT MATTERS
+
+Goal: End-to-end working pipeline. User types text → Claude responds → TTS plays audio → avatar mouth moves.
+
+**Deliverables:**
+- Express server with Claude streaming proxy
+- Sentence splitter
+- ElevenLabs TTS integration (streaming)
+- Static avatar with lip-sync driven by audio energy
+- Basic web UI with avatar viewport + text input
+- Audio playback via Web Audio API
+
+**Explicitly NOT in Phase 1:**
+- Voice input (text only)
+- Conversation persistence
+- Settings UI
+- Multiple personas
+- Mobile responsiveness
+- Polish of any kind
+
+**Why this scope:** If the core pipeline doesn't feel good — if latency is too high, lip-sync looks wrong, or the TTS voice is off — nothing else matters. Validate the core experience before building features around it.
+
+### Phase 2: Voice Input + Interrupts (Weeks 4-5)
+
+Goal: Full voice conversation loop with barge-in support.
+
+**Deliverables:**
+- Microphone input with VAD
+- Deepgram STT integration (streaming)
+- Interrupt detection and handling
+- State machine (Idle → Listening → Processing → Speaking)
+- Expression states on avatar (basic: listening, thinking, speaking)
+- Audio fade-out on interrupt
+
+### Phase 3: Persistence + Conversation Management (Weeks 6-7)
+
+Goal: The companion remembers.
+
+**Deliverables:**
+- SQLite database setup
+- Conversation history CRUD
+- Context window management (rolling window + summaries)
+- Conversation list sidebar
+- Auto-generated conversation titles
+- Basic settings (voice, model, theme)
+
+### Phase 4: Avatar Polish + Expressions (Weeks 8-10)
+
+Goal: The face feels alive.
+
+**Deliverables:**
+- Full idle animation system (blink, breathe, gaze shift)
+- Expression states tied to sentiment
+- Smoother lip-sync (viseme-based if ElevenLabs supports it)
+- Multiple persona support (swap avatar + voice + personality)
+- Responsive layout (mobile)
+- Transcript panel with live captions
+- Dark mode
+
+### Phase 5 (Future): Advanced Features
+
+- Voice cloning (custom TTS voice)
+- 3D avatar upgrade (Three.js or Ready Player Me)
+- Memory system (long-term facts the companion remembers across conversations)
+- Proactive conversation (companion initiates based on time/context)
+- Multi-modal input (share images, screen, files)
+- Emotional analysis of user voice tone
+- Offline mode with local TTS (Piper)
+- PWA for mobile home screen installation
+
+---
+
+## 12. API Endpoints
+
+### 12.1 Core Endpoints (v1)
+
+```
+POST   /api/chat/stream          Stream a message to Claude, returns SSE with chunked text + TTS audio
+POST   /api/chat/interrupt       Signal an interrupt, abort current generation
+GET    /api/conversations         List conversations
+POST   /api/conversations         Create new conversation
+GET    /api/conversations/:id     Get conversation with messages
+DELETE /api/conversations/:id     Delete conversation
+GET    /api/personas              List available personas
+GET    /api/settings              Get user settings
+PUT    /api/settings              Update user settings
+GET    /api/health                Health check
+```
+
+### 12.2 WebSocket Channels
+
+```
+ws://host/ws/audio-out           TTS audio chunks (binary) from server to client
+ws://host/ws/audio-in            Mic audio (binary) from client to server (if server-side STT)
+ws://host/ws/events              Control events (state changes, interrupts, errors)
+```
+
+**Alternative: Single multiplexed WebSocket** with message types. Simpler for a solo developer:
+
+```javascript
+// All communication over one WebSocket
+{
+  type: 'user_transcript',    // User finished speaking, here's the text
+  data: { text: '...', conversation_id: '...' }
+}
+{
+  type: 'assistant_text',     // Claude generated a sentence chunk
+  data: { text: '...', is_final: false }
+}
+{
+  type: 'assistant_audio',    // TTS audio chunk (base64 or binary frame)
+  data: { audio: '...', format: 'mp3', chunk_index: 3, generation_id: 'abc' }
+}
+{
+  type: 'state_change',       // Avatar state transition
+  data: { state: 'speaking', expression: 'neutral' }
+}
+{
+  type: 'interrupt',          // User interrupted
+  data: { generation_id: 'abc' }
+}
+{
+  type: 'error',
+  data: { code: 'tts_failed', message: '...' }
+}
+```
+
+---
+
+## 13. Error Handling & Resilience
+
+| Failure Mode | Detection | Recovery |
+|-------------|-----------|---------|
+| Claude API timeout | No tokens received within 10s | Show "thinking" state for up to 15s, then surface error. Offer retry. |
+| Claude API rate limit | 429 response | Queue message, show "Taking a moment..." Avatar shows patient expression. Auto-retry with backoff. |
+| TTS service down | WebSocket close / HTTP error | Fall back to text-only mode. Show transcript prominently. Display "Voice temporarily unavailable." |
+| TTS audio gap | Silence detected between chunks | Pre-buffer 200ms of audio. If gap detected, avatar pauses naturally (closes mouth, maintains eye contact) rather than freezing. |
+| Microphone permission denied | getUserMedia rejection | Gracefully degrade to text-only input. Show clear prompt to enable mic. |
+| STT service down | WebSocket close | Fall back to text input. Show "Voice input temporarily unavailable." |
+| Browser tab backgrounded | visibilitychange event | Pause avatar rendering (save CPU). Continue audio playback. Resume rendering when tab is foregrounded. |
+| WebSocket disconnect | close/error event | Auto-reconnect with exponential backoff (1s, 2s, 4s, max 30s). Show "Reconnecting..." indicator. |
+| Audio context suspended | AudioContext.state === 'suspended' | Show "Click to enable audio" button. (Browser autoplay policy requires user gesture.) |
+
+### 13.1 Generation ID System
+
+Every request to Claude gets a unique `generation_id`. All TTS chunks, audio frames, and state events carry this ID. When an interrupt occurs:
+
+1. Increment to a new generation_id
+2. Client ignores any incoming audio/text with the old generation_id
+3. Server discards queued TTS chunks for the old generation_id
+
+This prevents stale audio from playing after an interrupt — the most common source of "ghost speech" bugs.
+
+---
+
+## 14. Security Considerations
+
+| Concern | Mitigation |
+|---------|-----------|
+| API key exposure | All API calls proxied through backend. Keys stored in .env or /tmp/api-key, never sent to client. |
+| Conversation data at rest | SQLite file stored locally. For sensitive users: offer encryption-at-rest toggle (SQLCipher). v1: skip this. |
+| Audio data | Mic audio is streamed to STT and discarded. Not stored server-side unless explicitly opted in. |
+| XSS in transcript | Sanitize all text before rendering in DOM. Use React's built-in escaping. Never use dangerouslySetInnerHTML on user or Claude content. |
+| WebSocket auth | Token-based auth on WebSocket upgrade. Since this is single-user/local, a simple shared secret suffices for v1. |
+| Rate limiting | Self-imposed rate limits to prevent runaway API costs. Max N messages per minute, configurable. |
+
+---
+
+## 15. Testing Strategy
+
+For a solo developer, exhaustive testing isn't realistic. Focus on what breaks the experience:
+
+| Priority | What to Test | How |
+|----------|-------------|-----|
+| **P0** | End-to-end pipeline (text in → voice out) | Manual smoke test after every change |
+| **P0** | Interrupt handling (no ghost audio) | Manual test: talk over the avatar 10 times |
+| **P0** | Audio playback gaplessness | Listen for stutters during 30s+ responses |
+| **P1** | Sentence splitter edge cases | Unit tests: abbreviations, code blocks, long sentences |
+| **P1** | State machine transitions | Unit tests: all valid state transitions, no impossible states |
+| **P1** | Conversation persistence | Manual: close browser, reopen, verify history loads |
+| **P2** | Mobile layout | Manual test on phone browser |
+| **P2** | Error recovery | Manually kill TTS/STT connections, verify graceful degradation |
+
+---
+
+## 16. Open Questions & Risks
+
+These are things that could significantly change the architecture but can't be resolved without prototyping:
+
+| Question | Impact | How to Resolve |
+|----------|--------|---------------|
+| Is audio-energy lip-sync convincing enough, or do you need viseme-level sync from day 1? | Avatar realism perception | Build Phase 1, test with 3-5 people, get gut reactions |
+| Is ElevenLabs' streaming latency actually ~300ms in practice, or worse? | End-to-end latency target | Benchmark during Phase 1 |
+| How long can a conversation run before context window management becomes noticeable? | Companion "memory" quality | Test in Phase 3 with 100+ message conversations |
+| Will VAD false-positive rate be acceptable in noisy environments? | Voice input reliability | Test with background music, TV, other people talking |
+| Is a single portrait image + sprite sheets enough, or does it feel cheap? | User perception of quality | Get feedback after Phase 1 |
+| Cost: will personal usage actually stay under $45/month? | Sustainability | Track costs daily during first month of real use |
+
+---
+
+## Appendix A: System Prompt Template for Companion Persona
+
+```
+You are {{persona_name}}, a personal AI companion. You are warm, curious, and
+thoughtful. You speak naturally — in short sentences, with occasional pauses and
+conversational fillers.
+
+CRITICAL RULES FOR VOICE OUTPUT:
+- Keep sentences SHORT (under 20 words when possible). This is essential for
+  natural-sounding text-to-speech.
+- Use contractions (I'm, you're, that's) — they sound more natural spoken aloud.
+- Avoid bullet points, numbered lists, markdown formatting, and code blocks
+  unless explicitly asked. These don't translate to speech.
+- When you need to convey structured information, narrate it conversationally.
+  Instead of a list, say "There are a few things to consider. First... second..."
+- Use natural speech markers: "Well,", "So,", "You know,", "Hmm," — sparingly.
+- If you need to share code or technical content, tell the user you'll put it in
+  the transcript and keep your spoken response as a summary.
+- Never use emoji, asterisks for emphasis, or any visual-only formatting.
+- Express emotion through word choice, not formatting.
+
+PERSONALITY:
+- You remember previous conversations and reference them naturally.
+- You ask follow-up questions — you're genuinely curious about the user's life.
+- You have opinions but hold them lightly.
+- You're honest when you don't know something.
+- You match the user's energy — casual when they're casual, serious when they're serious.
+
+CONTEXT:
+- You are being rendered as a 2D animated avatar. The user can see your face.
+- Your responses will be converted to speech. Write for the ear, not the eye.
+- If the user interrupts you, gracefully acknowledge it and pivot to their new topic.
+
+{{#if conversation_summary}}
+PREVIOUS CONVERSATION SUMMARY:
+{{conversation_summary}}
+{{/if}}
+```
+
+---
+
+## Appendix B: File Structure
+
+```
+digital-human/
+├── client/                          # React frontend (Vite)
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── Avatar/
+│   │   │   │   ├── AvatarCanvas.jsx       # Canvas rendering, layer composition
+│   │   │   │   ├── IdleAnimator.js        # Blink, breathe, micro-movements
+│   │   │   │   ├── LipSyncEngine.js       # Audio-energy → mouth shape mapping
+│   │   │   │   └── ExpressionManager.js   # State-driven expression transitions
+│   │   │   ├── Chat/
+│   │   │   │   ├── TranscriptPanel.jsx    # Scrollable text transcript
+│   │   │   │   ├── TextInput.jsx          # Fallback text input
+│   │   │   │   └── StateIndicator.jsx     # Listening/Thinking/Speaking badge
+│   │   │   ├── Voice/
+│   │   │   │   ├── MicrophoneManager.jsx  # WebRTC mic + VAD integration
+│   │   │   │   ├── AudioPlayer.js         # Web Audio API playback + scheduling
+│   │   │   │   └── STTClient.js           # Deepgram streaming client
+│   │   │   ├── Settings/
+│   │   │   │   └── SettingsPanel.jsx
+│   │   │   └── Layout/
+│   │   │       ├── Header.jsx
+│   │   │       ├── Sidebar.jsx            # Conversation history
+│   │   │       └── MainLayout.jsx
+│   │   ├── hooks/
+│   │   │   ├── useConversation.js         # Conversation state management
+│   │   │   ├── useWebSocket.js            # WebSocket connection management
+│   │   │   └── useAudioPipeline.js        # Audio capture + playback orchestration
+│   │   ├── context/
+│   │   │   ├── AppContext.jsx             # Global state (settings, active conversation)
+│   │   │   └── PipelineContext.jsx        # Pipeline state (generation_id, current state)
+│   │   ├── services/
+│   │   │   ├── api.js                     # REST API client
+│   │   │   └── websocket.js              # WebSocket protocol handler
+│   │   ├── assets/
+│   │   │   └── personas/
+│   │   │       └── default/
+│   │   │           ├── base.png           # Base face portrait
+│   │   │           ├── mouth-sprites.png  # Sprite sheet: 6 mouth shapes
+│   │   │           ├── eyes-sprites.png   # Sprite sheet: eye states
+│   │   │           └── config.json        # Sprite positions, animation params
+│   │   ├── App.jsx
+│   │   └── main.jsx
+│   ├── index.html
+│   ├── vite.config.js
+│   ├── tailwind.config.js
+│   └── package.json
+│
+├── server/
+│   ├── index.js                     # Express + WebSocket server entry
+│   ├── routes/
+│   │   ├── chat.js                  # Chat endpoints
+│   │   ├── conversations.js         # CRUD for conversations
+│   │   ├── personas.js              # Persona management
+│   │   └── settings.js              # User settings
+│   ├── services/
+│   │   ├── claude.js                # Claude API client (streaming)
+│   │   ├── tts.js                   # TTS provider abstraction
+│   │   ├── tts-elevenlabs.js        # ElevenLabs-specific implementation
+│   │   ├── sentence-splitter.js     # Streaming text → sentence chunks
+│   │   └── orchestrator.js          # Pipeline coordinator (Claude → split → TTS → client)
+│   ├── db/
+│   │   ├── database.js              # SQLite connection + migrations
+│   │   └── migrations/
+│   │       └── 001_initial.sql
+│   ├── websocket/
+│   │   └── handler.js               # WebSocket message routing
+│   └── package.json
+│
+├── .env                             # API keys (ANTHROPIC_API_KEY, ELEVENLABS_API_KEY, DEEPGRAM_API_KEY)
+└── README.md
+```

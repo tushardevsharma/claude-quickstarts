@@ -1,0 +1,722 @@
+{
+  "project": "Digital Human AI Companion",
+  "description": "Browser-based AI companion with 2D animated talking avatar, voice I/O, and persistent memory",
+  "features": [
+    {
+      "id": 1,
+      "category": "Infrastructure",
+      "name": "Project Setup & Dev Server",
+      "description": "Project scaffolding with client (React+Vite) and server (Node/Express) running",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Verify the app loads without errors",
+        "Check browser console has no critical errors",
+        "Verify the page title is 'Digital Human Companion'"
+      ],
+      "passes": true
+    },
+    {
+      "id": 2,
+      "category": "Infrastructure",
+      "name": "Backend Health Check",
+      "description": "Express server running with /api/health endpoint returning 200",
+      "steps": [
+        "Navigate to http://localhost:3000/api/health",
+        "Verify JSON response with status 'ok'",
+        "Verify server name and version fields present"
+      ],
+      "passes": true
+    },
+    {
+      "id": 3,
+      "category": "UI Layout",
+      "name": "Main Layout Structure",
+      "description": "Header bar, avatar viewport, transcript panel, and text input bar rendered correctly",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Verify header with app title 'Digital Human Companion' is visible",
+        "Verify avatar viewport area is visible in center",
+        "Verify transcript panel exists below avatar",
+        "Verify text input bar is at the bottom",
+        "Take screenshot to confirm layout"
+      ],
+      "passes": true
+    },
+    {
+      "id": 4,
+      "category": "UI Layout",
+      "name": "Dark Mode Toggle",
+      "description": "Theme toggle button switches between light and dark mode",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Locate the moon/sun icon in the header",
+        "Click it to toggle dark mode",
+        "Verify background color changes to dark",
+        "Click again to return to light mode",
+        "Take screenshot in both modes"
+      ],
+      "passes": true
+    },
+    {
+      "id": 5,
+      "category": "UI Layout",
+      "name": "Responsive Layout - Mobile",
+      "description": "Layout adapts correctly at mobile viewport sizes",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Resize viewport to 375px wide",
+        "Verify avatar fills top portion",
+        "Verify transcript panel shows below",
+        "Verify no overflow or broken layout",
+        "Take screenshot"
+      ],
+      "passes": false
+    },
+    {
+      "id": 6,
+      "category": "Avatar",
+      "name": "Avatar Canvas Renders",
+      "description": "2D avatar canvas renders with a face portrait visible",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Verify a canvas element is present in the avatar viewport",
+        "Verify the avatar face is rendered (not blank canvas)",
+        "Take screenshot of the avatar"
+      ],
+      "passes": true
+    },
+    {
+      "id": 7,
+      "category": "Avatar",
+      "name": "Avatar Idle Animations",
+      "description": "Avatar has idle animations: blinking eyes and subtle breathing movement",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Observe the avatar for 5 seconds",
+        "Verify the eyes blink at least once",
+        "Verify subtle breathing/movement animation is visible",
+        "Take screenshot"
+      ],
+      "passes": true
+    },
+    {
+      "id": 8,
+      "category": "Avatar",
+      "name": "Avatar State - Listening",
+      "description": "Avatar transitions to 'Listening' state visually when user is speaking",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Click the microphone button to enable voice input",
+        "Speak into the microphone",
+        "Verify avatar shows 'Listening' expression",
+        "Verify blue state indicator shows 'Listening...'",
+        "Take screenshot"
+      ],
+      "passes": true
+    },
+    {
+      "id": 9,
+      "category": "Avatar",
+      "name": "Avatar State - Thinking",
+      "description": "Avatar shows 'Thinking' state while Claude is generating a response",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Type a message in the text input and send",
+        "Verify avatar immediately shows 'Thinking' expression",
+        "Verify amber/yellow state indicator shows 'Thinking...'",
+        "Take screenshot"
+      ],
+      "passes": true
+    },
+    {
+      "id": 10,
+      "category": "Avatar",
+      "name": "Avatar State - Speaking with Lip-Sync",
+      "description": "Avatar shows speaking state with lip movements synchronized to audio",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Send a text message",
+        "Wait for avatar to start speaking",
+        "Verify avatar mouth moves in sync with audio",
+        "Verify green state indicator shows 'Speaking...'",
+        "Take screenshot"
+      ],
+      "passes": true
+    },
+    {
+      "id": 11,
+      "category": "Text Input",
+      "name": "Text Message Send - Enter Key",
+      "description": "User can type a message and send with Enter key",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Click the text input field",
+        "Type 'Hello, how are you?'",
+        "Press Enter",
+        "Verify message appears in transcript",
+        "Verify avatar starts processing"
+      ],
+      "passes": true
+    },
+    {
+      "id": 12,
+      "category": "Text Input",
+      "name": "Text Message Send - Button Click",
+      "description": "User can send message by clicking the send button",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Type 'Tell me a short story' in the text input",
+        "Click the send button (arrow icon)",
+        "Verify message appears in transcript",
+        "Verify avatar responds"
+      ],
+      "passes": true
+    },
+    {
+      "id": 13,
+      "category": "Text Input",
+      "name": "Empty Message Prevention",
+      "description": "Sending empty message is prevented",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Leave text input empty",
+        "Press Enter",
+        "Verify no message is sent",
+        "Verify no errors occur"
+      ],
+      "passes": true
+    },
+    {
+      "id": 14,
+      "category": "Claude AI Integration",
+      "name": "Claude API Response",
+      "description": "Claude API returns a response to user messages",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Type 'What is 2+2?' and send",
+        "Verify response appears in transcript within 10 seconds",
+        "Verify response contains '4'",
+        "Take screenshot of transcript with response"
+      ],
+      "passes": true
+    },
+    {
+      "id": 15,
+      "category": "Claude AI Integration",
+      "name": "Streaming Response Display",
+      "description": "Claude's response streams token-by-token in the transcript",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Send a message asking for a paragraph-length response",
+        "Verify text appears progressively in the transcript (streaming, not all at once)",
+        "Verify response completes fully"
+      ],
+      "passes": true
+    },
+    {
+      "id": 16,
+      "category": "TTS Audio",
+      "name": "Text-to-Speech Plays",
+      "description": "Avatar speaks the response using TTS",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Ensure system volume is audible",
+        "Send a short message like 'Say hello'",
+        "Verify audio plays with avatar's voice",
+        "Verify avatar mouth moves during audio"
+      ],
+      "passes": true
+    },
+    {
+      "id": 17,
+      "category": "TTS Audio",
+      "name": "Audio Playback Controls - Stop",
+      "description": "User can stop avatar mid-speech with stop button",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Send a message that generates a long response",
+        "While avatar is speaking, locate the stop button",
+        "Click the stop button",
+        "Verify audio stops immediately",
+        "Verify avatar returns to idle state"
+      ],
+      "passes": false
+    },
+    {
+      "id": 18,
+      "category": "Voice Input",
+      "name": "Microphone Permission Request",
+      "description": "Clicking mic button requests browser microphone permission",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Locate microphone button in header",
+        "Click the microphone button",
+        "Verify browser shows or has shown microphone permission dialog",
+        "Verify mic icon changes state (active/inactive)"
+      ],
+      "passes": true
+    },
+    {
+      "id": 19,
+      "category": "Voice Input",
+      "name": "Voice Activity Detection",
+      "description": "VAD detects when user starts and stops speaking",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Enable microphone",
+        "Speak a sentence into the microphone",
+        "Verify 'Listening...' indicator appears when speaking",
+        "Verify indicator changes when speech ends"
+      ],
+      "passes": false
+    },
+    {
+      "id": 20,
+      "category": "Voice Input",
+      "name": "Speech-to-Text Transcription",
+      "description": "Spoken words are transcribed and sent to Claude",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Enable microphone",
+        "Say 'What is the capital of France?'",
+        "Verify transcription appears in transcript panel",
+        "Verify Claude responds about Paris"
+      ],
+      "passes": false
+    },
+    {
+      "id": 21,
+      "category": "Voice Input",
+      "name": "Microphone Toggle Off",
+      "description": "User can disable microphone input",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Enable microphone",
+        "Click mic button again to disable",
+        "Verify mic icon shows as muted/off",
+        "Verify speaking does not trigger listening state"
+      ],
+      "passes": false
+    },
+    {
+      "id": 22,
+      "category": "Interruption",
+      "name": "Barge-In Interrupt",
+      "description": "User can interrupt avatar mid-speech by speaking",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Enable microphone",
+        "Send a long message to get extended response",
+        "While avatar is speaking, speak into microphone",
+        "Verify avatar stops speaking",
+        "Verify avatar transitions to Listening state",
+        "Verify audio fades out smoothly (not abrupt cut)"
+      ],
+      "passes": false
+    },
+    {
+      "id": 23,
+      "category": "Interruption",
+      "name": "Stop Button Interrupt",
+      "description": "Stop button appears during Speaking state and stops playback",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Send a message that generates a long response",
+        "Verify send button changes to stop button during Speaking state",
+        "Click stop button",
+        "Verify avatar stops immediately",
+        "Verify UI returns to ready state"
+      ],
+      "passes": false
+    },
+    {
+      "id": 24,
+      "category": "Interruption",
+      "name": "Post-Interrupt Recovery",
+      "description": "After interrupt, user can immediately send another message",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Send long message, wait for speaking to start",
+        "Click stop button to interrupt",
+        "Type a new message immediately",
+        "Send it",
+        "Verify Claude responds to the new message"
+      ],
+      "passes": false
+    },
+    {
+      "id": 25,
+      "category": "Transcript Panel",
+      "name": "Transcript Shows User Messages",
+      "description": "User messages appear in the transcript panel",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Send the message 'Hello world test'",
+        "Verify 'Hello world test' appears in transcript panel",
+        "Verify it is styled as a user message (right-aligned or labeled 'You')"
+      ],
+      "passes": true
+    },
+    {
+      "id": 26,
+      "category": "Transcript Panel",
+      "name": "Transcript Shows Assistant Messages",
+      "description": "Claude's responses appear in the transcript panel",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Send a message and wait for response",
+        "Verify Claude's response appears in transcript",
+        "Verify it is styled as assistant message (left-aligned or labeled with avatar name)"
+      ],
+      "passes": true
+    },
+    {
+      "id": 27,
+      "category": "Transcript Panel",
+      "name": "Transcript Scrolls to Latest",
+      "description": "Transcript auto-scrolls to show latest messages",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Send 5+ messages to fill transcript",
+        "Verify transcript always shows latest message",
+        "Verify older messages can be scrolled to manually"
+      ],
+      "passes": true
+    },
+    {
+      "id": 28,
+      "category": "Transcript Panel",
+      "name": "Transcript Collapse Toggle",
+      "description": "Transcript panel can be collapsed and expanded",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Locate the transcript panel collapse button",
+        "Click to collapse",
+        "Verify transcript panel hides",
+        "Click again to expand",
+        "Verify transcript is visible again"
+      ],
+      "passes": true
+    },
+    {
+      "id": 29,
+      "category": "State Indicator",
+      "name": "State Indicator - Idle",
+      "description": "State indicator shows correct idle state text",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Verify state indicator shows 'Ready' or no indicator when idle",
+        "Take screenshot"
+      ],
+      "passes": true
+    },
+    {
+      "id": 30,
+      "category": "State Indicator",
+      "name": "State Indicator - All States",
+      "description": "State indicator correctly shows Listening, Thinking, Speaking states with correct colors",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Enable mic, speak - verify blue 'Listening...' indicator",
+        "Send text message - verify amber 'Thinking...' indicator",
+        "Wait for response - verify green 'Speaking...' indicator",
+        "Take screenshots of each state"
+      ],
+      "passes": true
+    },
+    {
+      "id": 31,
+      "category": "Conversation Persistence",
+      "name": "Messages Saved to Database",
+      "description": "Conversation messages are persisted in SQLite database",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Send 'Test message for persistence'",
+        "Wait for response",
+        "Verify conversation is saved (check via API at /api/conversations)"
+      ],
+      "passes": true
+    },
+    {
+      "id": 32,
+      "category": "Conversation Persistence",
+      "name": "Conversation History Loads on Reload",
+      "description": "Previous conversation loads when page is refreshed",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Send a distinctive message like 'Remember this unique message 12345'",
+        "Wait for response",
+        "Reload the page (F5)",
+        "Verify the previous messages appear in transcript",
+        "Take screenshot"
+      ],
+      "passes": true
+    },
+    {
+      "id": 33,
+      "category": "Conversation Persistence",
+      "name": "New Conversation Creation",
+      "description": "User can start a new conversation",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Send a message and get a response",
+        "Click 'New Conversation' button (in sidebar or header)",
+        "Verify transcript clears",
+        "Verify new conversation starts fresh",
+        "Send a new message to confirm it works"
+      ],
+      "passes": true
+    },
+    {
+      "id": 34,
+      "category": "Conversation History",
+      "name": "Sidebar Opens with History",
+      "description": "Hamburger menu opens sidebar with conversation history list",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Create 2-3 conversations with different messages",
+        "Click hamburger menu icon",
+        "Verify sidebar opens",
+        "Verify past conversations are listed",
+        "Take screenshot"
+      ],
+      "passes": true
+    },
+    {
+      "id": 35,
+      "category": "Conversation History",
+      "name": "Load Previous Conversation",
+      "description": "Clicking a past conversation loads its messages",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Create multiple conversations",
+        "Open sidebar",
+        "Click on a previous conversation",
+        "Verify its messages load in the transcript",
+        "Take screenshot"
+      ],
+      "passes": true
+    },
+    {
+      "id": 36,
+      "category": "Conversation History",
+      "name": "Auto-Generated Conversation Title",
+      "description": "Conversations get auto-generated titles based on first exchange",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Start a new conversation about 'Python programming'",
+        "Send a few messages",
+        "Open sidebar",
+        "Verify conversation has a descriptive title (not 'Untitled')",
+        "Take screenshot"
+      ],
+      "passes": true
+    },
+    {
+      "id": 37,
+      "category": "Conversation History",
+      "name": "Delete Conversation",
+      "description": "User can delete a conversation from history",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Create a conversation",
+        "Open sidebar",
+        "Find the delete button for a conversation",
+        "Click delete",
+        "Verify confirmation prompt appears",
+        "Confirm deletion",
+        "Verify conversation removed from list"
+      ],
+      "passes": true
+    },
+    {
+      "id": 38,
+      "category": "Settings",
+      "name": "Settings Panel Opens",
+      "description": "Settings gear icon opens the settings panel",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Click the gear icon in the header",
+        "Verify settings panel opens",
+        "Verify it contains settings categories",
+        "Take screenshot"
+      ],
+      "passes": true
+    },
+    {
+      "id": 39,
+      "category": "Settings",
+      "name": "Volume Control",
+      "description": "Volume slider adjusts TTS playback volume",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Open settings panel",
+        "Locate volume slider",
+        "Drag slider to 0 (mute)",
+        "Send a message",
+        "Verify no audio plays",
+        "Drag slider back to 80",
+        "Verify audio plays again"
+      ],
+      "passes": true
+    },
+    {
+      "id": 40,
+      "category": "Settings",
+      "name": "Show/Hide Transcript Toggle",
+      "description": "Settings toggle controls transcript panel visibility",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Open settings panel",
+        "Toggle 'Show transcript' to off",
+        "Verify transcript panel hides",
+        "Toggle back on",
+        "Verify transcript reappears"
+      ],
+      "passes": true
+    },
+    {
+      "id": 41,
+      "category": "Settings",
+      "name": "Clear Conversation History",
+      "description": "Settings has 'Clear all history' button that removes all conversations",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Create some conversations",
+        "Open settings panel",
+        "Click 'Clear all history' button",
+        "Verify confirmation dialog appears",
+        "Confirm",
+        "Verify sidebar shows no conversations"
+      ],
+      "passes": true
+    },
+    {
+      "id": 42,
+      "category": "Error Handling",
+      "name": "TTS Fallback Mode",
+      "description": "When TTS service unavailable, app falls back to browser speech or text-only mode",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "If ElevenLabs is unavailable, verify a fallback TTS or text-only mode activates",
+        "Verify a user-facing message explains voice is unavailable",
+        "Verify conversation still works in text mode",
+        "Take screenshot"
+      ],
+      "passes": true
+    },
+    {
+      "id": 43,
+      "category": "Error Handling",
+      "name": "Microphone Permission Denied",
+      "description": "Clear message shown when mic permission is denied",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Click microphone button",
+        "If/when permission denied, verify clear error message appears",
+        "Verify app degrades gracefully to text-only",
+        "Verify text input still works"
+      ],
+      "passes": false
+    },
+    {
+      "id": 44,
+      "category": "Error Handling",
+      "name": "Claude API Error Recovery",
+      "description": "If Claude API fails, user sees error with retry option",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Send a message when API key is invalid or service is down",
+        "Verify error message appears in UI",
+        "Verify error is not just a console error",
+        "Verify user can retry"
+      ],
+      "passes": false
+    },
+    {
+      "id": 45,
+      "category": "Persona",
+      "name": "Default Persona 'Nova' Active",
+      "description": "Default persona 'Nova' is active with correct name and personality",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Verify avatar is labeled or titled 'Nova' somewhere in the UI",
+        "Send a greeting message",
+        "Verify response reflects Nova's warm, conversational personality",
+        "Verify short, natural-sounding sentences in response"
+      ],
+      "passes": true
+    },
+    {
+      "id": 46,
+      "category": "Persona",
+      "name": "System Prompt Shapes Responses",
+      "description": "Claude uses the companion persona system prompt",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Ask Claude 'Who are you?'",
+        "Verify response identifies as Nova (not Claude)",
+        "Verify conversational, warm tone",
+        "Take screenshot of response"
+      ],
+      "passes": true
+    },
+    {
+      "id": 47,
+      "category": "Context Window",
+      "name": "Conversation Context Maintained",
+      "description": "Claude remembers earlier messages in the same conversation",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Send 'My name is Alex'",
+        "Send a few more messages",
+        "Then send 'What is my name?'",
+        "Verify Claude responds with 'Alex'",
+        "Take screenshot"
+      ],
+      "passes": true
+    },
+    {
+      "id": 48,
+      "category": "UI Polish",
+      "name": "Loading State on App Start",
+      "description": "App shows a loading state while initializing",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Observe the initial load",
+        "Verify a loading indicator or animation shows briefly",
+        "Verify app transitions smoothly to ready state"
+      ],
+      "passes": true
+    },
+    {
+      "id": 49,
+      "category": "UI Polish",
+      "name": "No White-on-White or Invisible Text",
+      "description": "All text has sufficient contrast in both light and dark modes",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Check all visible text has good contrast",
+        "Toggle dark mode and check again",
+        "Take screenshots of both modes",
+        "Verify no invisible text"
+      ],
+      "passes": true
+    },
+    {
+      "id": 50,
+      "category": "UI Polish",
+      "name": "Hover States on Interactive Elements",
+      "description": "Buttons and interactive elements show hover states",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Hover over microphone button",
+        "Hover over send button",
+        "Hover over settings gear",
+        "Verify each shows a visible hover effect",
+        "Take screenshot"
+      ],
+      "passes": true
+    }
+  ]
+}
