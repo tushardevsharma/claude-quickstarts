@@ -1,6 +1,6 @@
 Digital Human AI Companion — Build Progress
 ============================================
-Date: 2026-03-17 (Sessions 4, 5, 6 update)
+Date: 2026-03-17 (Sessions 4, 5, 6, 7, 8 update)
 Build Agent: Claude (Autonomous Coding Agent)
 
 PROJECT SUMMARY
@@ -65,6 +65,7 @@ Session 4 additions:  14 new → 79/100 passing (#58, #60, #61, #79, #83, #86, #
 Session 5 additions:   7 new → 86/100 passing (#80, #81, #85, #88, #89, #90, #100)
 Session 6 additions:   7 new → 93/100 passing (#55, #56, #57, #69, #70, #82, #84)
 Session 7 additions:   3 new → 96/100 passing (#54, #98, #99)
+Session 8 additions:   0 new → 96/100 passing (verification session only)
 
 CURRENT STATUS: 96/100 passing
 
@@ -197,6 +198,25 @@ UPDATED: client/src/components/Chat/TranscriptPanel.jsx
 
 UPDATED: client/src/App.jsx
   - Passes activeModel to sendMessage() for per-model timeout calculation
+
+SESSION 8 WORK (2026-03-17)
+-----------------------------
+Verification session - no new features implemented. Confirmed all 96 passing tests
+still work end-to-end via browser automation:
+
+VERIFIED WORKING:
+- Chat: sent "Hello! What is 2 + 2?" → Nova responded correctly with "It's 4"
+- Avatar: lip-sync animation during Speaking state, idle blink between turns
+- State indicators: Speaking... |||| shown during response, stop button present
+- Transcript: auto-scrolls to latest messages, shows full conversation history
+- Settings panel: all sections visible (AI, Display, Voice, Avatar, Input, Privacy)
+- Model switching: Haiku/Sonnet/Opus selection; avatar badge updates immediately
+- Dark/light mode toggle: html.dark class toggled; bg changes from #0F172A to #F9FAFB
+- Server health: GET /api/health returns status:ok, bedrock:true, websocket:true
+- Models API: GET /api/models returns all 3 models with correct metadata
+- Conversation history sidebar: shows past conversations with timestamps
+
+NO REGRESSIONS FOUND.
 
 STILL NOT PASSING (4 remaining)
 ---------------------------------
