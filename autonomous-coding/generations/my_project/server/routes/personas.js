@@ -6,7 +6,9 @@ const router = Router();
 // GET /api/personas - list all personas
 router.get('/', (req, res) => {
   const db = getDatabase();
-  const personas = db.prepare('SELECT id, name, voice_id, avatar_asset_pack FROM personas').all();
+  const personas = db.prepare(
+    'SELECT id, name, voice_id, avatar_asset_pack, avatar_asset_pack as avatar_assets FROM personas'
+  ).all();
   res.json({ personas });
 });
 

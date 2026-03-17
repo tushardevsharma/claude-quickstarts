@@ -29,6 +29,7 @@ import chatRoutes from './routes/chat.js';
 import conversationRoutes from './routes/conversations.js';
 import settingsRoutes from './routes/settings.js';
 import personaRoutes from './routes/personas.js';
+import modelRoutes from './routes/models.js';
 import { logConfig as logClaudeConfig } from './services/claude.js';
 
 logClaudeConfig();
@@ -52,6 +53,7 @@ app.use('/api/chat', chatRoutes);
 app.use('/api/conversations', conversationRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/personas', personaRoutes);
+app.use('/api/models', modelRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

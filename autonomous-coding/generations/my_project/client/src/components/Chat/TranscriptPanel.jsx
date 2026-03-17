@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { usePipeline, STATES } from '../../context/PipelineContext.jsx';
+import { useApp } from '../../context/AppContext.jsx';
 
 function MessageBubble({ message }) {
   const isUser = message.role === 'user';
@@ -49,6 +50,8 @@ function StreamingMessage({ text }) {
 export default function TranscriptPanel({ messages, isCollapsed, onToggle }) {
   const scrollRef = useRef(null);
   const { currentText, avatarState } = usePipeline();
+  const { captionFontSize } = useApp();
+  const fontSizeClass = { small: 'text-xs', medium: 'text-sm', large: 'text-base' }[captionFontSize] || 'text-sm';
 
   // Auto-scroll to bottom when new content appears
   useEffect(() => {
@@ -97,7 +100,7 @@ export default function TranscriptPanel({ messages, isCollapsed, onToggle }) {
       {/* Messages */}
       <div
         ref={scrollRef}
-        className="overflow-y-auto p-3 space-y-1 max-h-48"
+        className={`overflow-y-auto p-3 space-y-1 max-h-48 ${fontSizeClass}`}
         style={{ scrollBehavior: 'smooth' }}
       >
         {messages.length === 0 && !isStreaming ? (

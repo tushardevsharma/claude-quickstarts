@@ -731,7 +731,7 @@
         "Verify each entry has id, display_name, tier, latency_profile, cost_per_1k_input, cost_per_1k_output fields",
         "Verify a 'background_task_model' field is present pointing to Haiku"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 52,
@@ -746,7 +746,7 @@
         "Verify each option shows tier and speed indicators",
         "Take screenshot of the dropdown open"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 53,
@@ -761,7 +761,7 @@
         "Switch model to Opus; verify badge turns amber",
         "Take screenshot of each badge state"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 54,
@@ -847,7 +847,7 @@
         "Verify messages sent after a model switch have the new model_id",
         "Verify the conversation object has an active_model field reflecting the current model"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 60,
@@ -892,7 +892,7 @@
         "Change the selection and verify the UI reflects the new model",
         "Take screenshot"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 63,
@@ -907,7 +907,7 @@
         "Toggle between them and verify selection is reflected",
         "Take screenshot"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 64,
@@ -923,7 +923,7 @@
         "Toggle it back on",
         "Verify model badge reappears"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 65,
@@ -938,7 +938,7 @@
         "Select a different voice",
         "Send a message and verify TTS uses the newly selected voice"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 66,
@@ -954,7 +954,7 @@
         "Send a message and verify TTS plays noticeably faster",
         "Drag to 0.75x and verify slower playback"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 67,
@@ -969,7 +969,7 @@
         "Verify the selector is interactive (even if only one option exists for v1)",
         "Take screenshot"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 68,
@@ -984,7 +984,7 @@
         "Drag to minimum and verify avatar animations visibly slow down or reduce",
         "Drag to maximum and verify more pronounced idle movement"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 69,
@@ -1029,7 +1029,7 @@
         "Drag to small and verify text shrinks",
         "Take screenshot at each size"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 72,
@@ -1044,7 +1044,7 @@
         "Verify the concise response is noticeably shorter",
         "Take screenshots of both responses"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 73,
@@ -1059,7 +1059,7 @@
         "Verify no previous messages appear in transcript or sidebar",
         "Re-enable the toggle and verify subsequent conversations are saved"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 74,
@@ -1072,7 +1072,7 @@
         "Verify text chunks arrive progressively",
         "Verify a final event signals completion"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 75,
@@ -1086,7 +1086,7 @@
         "Verify the server responds with 200 OK",
         "Verify subsequent messages start a new generation successfully"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 76,
@@ -1100,7 +1100,7 @@
         "Verify each entry has id, name, voice_id, and avatar_assets fields",
         "Verify the default persona is marked or is the first entry"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 77,
@@ -1113,7 +1113,7 @@
         "Verify settings include at least volume, theme, show_transcript, and active_model fields",
         "Verify default values are sensible (volume 80, theme auto, etc.)"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 78,
@@ -1127,7 +1127,7 @@
         "Restart the server",
         "Send GET /api/settings again and verify volume is still 50"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 79,

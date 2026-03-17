@@ -1,6 +1,7 @@
 import { useRef, useEffect } from 'react';
 import { IdleAnimator } from './IdleAnimator.js';
 import { STATES } from '../../context/PipelineContext.jsx';
+import { useApp } from '../../context/AppContext.jsx';
 
 // Color palette
 const PAL = {
@@ -370,6 +371,7 @@ export default function AvatarCanvas({ avatarState, mouthOpenness = 0 }) {
   const animatorRef = useRef(new IdleAnimator());
   const rafRef = useRef(null);
   const mouthRef = useRef(mouthOpenness);
+  const { idleAnimationIntensity } = useApp();
 
   useEffect(() => {
     mouthRef.current = mouthOpenness;
@@ -378,6 +380,10 @@ export default function AvatarCanvas({ avatarState, mouthOpenness = 0 }) {
   useEffect(() => {
     animatorRef.current.setSpeaking(avatarState === STATES.SPEAKING);
   }, [avatarState]);
+
+  useEffect(() => {
+    animatorRef.current.setIntensityLevel(idleAnimationIntensity);
+  }, [idleAnimationIntensity]);
 
   // Main render loop
   useEffect(() => {

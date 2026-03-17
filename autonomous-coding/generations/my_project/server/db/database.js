@@ -34,6 +34,31 @@ export function initDatabase(dbPath = './data/companion.db') {
   );
   db.exec(migrationSql);
 
+  // Run migration 002 (ALTER TABLE - safe to re-run, errors ignored per column)
+  try {
+    const migration002 = readFileSync(
+      join(__dirname, 'migrations', '002_model_fields.sql'),
+      'utf-8'
+    );
+    // Run each statement individually so ALTER TABLE errors don't block the rest
+    const statements = migration002
+      .split(';')
+      .map(s => s.trim())
+      .filter(s => s.length > 0 && !s.startsWith('--'));
+    for (const stmt of statements) {
+      try {
+        db.exec(stmt + ';');
+      } catch (e) {
+        // Ignore "duplicate column" errors — column already exists
+        if (!e.message.includes('duplicate column')) {
+          console.warn('[DB] Migration 002 stmt warning:', e.message);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[DB] Migration 002 warning:', e.message);
+  }
+
   console.log('[DB] Database initialized at', dbPath);
   return db;
 }

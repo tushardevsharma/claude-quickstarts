@@ -4,6 +4,38 @@ import { getDatabase } from '../db/database.js';
 import { streamClaudeResponse, buildMessages, generateTitle } from '../services/claude.js';
 import { SentenceSplitter } from '../services/sentence-splitter.js';
 import { isElevenLabsConfigured, synthesizeElevenLabs } from '../services/tts.js';
+import { MODEL_REGISTRY } from './models.js';
+
+// Map user-facing model ID to bedrock model ID
+function resolveBedrockModelId(modelId) {
+  const entry = MODEL_REGISTRY.find(m => m.id === modelId);
+  // Use the process env override if present, otherwise construct from model tier
+  if (process.env.CLAUDE_CODE_USE_BEDROCK === '1') {
+    // Use the main configured model for sonnet-class; haiku for background tasks
+    if (modelId && modelId.includes('haiku')) {
+      return process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL || 'anthropic.claude-haiku-4-5-20251104-v1:0';
+    }
+    if (modelId && modelId.includes('opus')) {
+      return process.env.ANTHROPIC_DEFAULT_OPUS_MODEL || 'anthropic.claude-opus-4-5-20251101-v1:0';
+    }
+    // Default to configured sonnet model (may be an inference profile ARN)
+    return process.env.ANTHROPIC_DEFAULT_SONNET_MODEL || process.env.ANTHROPIC_MODEL ||
+      'anthropic.claude-sonnet-4-5-20250929-v1:0';
+  }
+  // Direct API
+  if (modelId && modelId.includes('haiku')) return 'claude-haiku-4-5';
+  if (modelId && modelId.includes('opus')) return 'claude-opus-4-5-20251101';
+  return 'claude-sonnet-4-5-20250929';
+}
+
+// Get active model from settings DB
+function getActiveModelId(db) {
+  try {
+    const row = db.prepare("SELECT value FROM settings WHERE key = 'active_model'").get();
+    if (row?.value) return JSON.parse(row.value);
+  } catch {}
+  return 'claude-sonnet-4-5';
+}
 
 const router = Router();
 
@@ -12,7 +44,7 @@ const activeGenerations = new Map();
 
 // POST /api/chat/stream - stream a message to Claude with SSE
 router.post('/stream', async (req, res) => {
-  const { text, conversation_id, generation_id } = req.body;
+  const { text, conversation_id, generation_id, model_id } = req.body;
 
   if (!text || !text.trim()) {
     return res.status(400).json({ error: 'Message text is required' });
@@ -20,13 +52,17 @@ router.post('/stream', async (req, res) => {
 
   const db = getDatabase();
 
+  // Determine active model
+  const activeModelId = model_id || getActiveModelId(db);
+  const resolvedModel = resolveBedrockModelId(activeModelId);
+
   // Get or create conversation
   let convId = conversation_id;
   if (!convId) {
     convId = uuidv4();
     db.prepare(
-      `INSERT INTO conversations (id, title, persona_id) VALUES (?, ?, ?)`
-    ).run(convId, 'New Conversation', 'nova');
+      `INSERT INTO conversations (id, title, persona_id, active_model) VALUES (?, ?, ?, ?)`
+    ).run(convId, 'New Conversation', 'nova', activeModelId);
   }
 
   // Verify conversation exists
@@ -35,9 +71,26 @@ router.post('/stream', async (req, res) => {
     return res.status(404).json({ error: 'Conversation not found' });
   }
 
+  // Update conversation active_model if changed
+  if (activeModelId && conversation.active_model !== activeModelId) {
+    db.prepare(`UPDATE conversations SET active_model = ? WHERE id = ?`).run(activeModelId, convId);
+  }
+
   // Get persona
   const persona = db.prepare('SELECT * FROM personas WHERE id = ?').get(conversation.persona_id || 'nova');
-  const systemPrompt = persona?.system_prompt || 'You are Nova, a warm AI companion.';
+
+  // Build system prompt with response style
+  let systemPrompt = persona?.system_prompt || 'You are Nova, a warm AI companion.';
+  try {
+    const styleRow = db.prepare("SELECT value FROM settings WHERE key = 'response_style'").get();
+    if (styleRow?.value) {
+      const style = JSON.parse(styleRow.value);
+      if (style === 'verbose') {
+        systemPrompt += '\n\nRESPONSE STYLE: Give thorough, detailed responses. Expand on ideas fully.';
+      }
+      // concise is the default from the system prompt
+    }
+  } catch {}
 
   // Save user message
   const userMsgId = uuidv4();
@@ -81,6 +134,7 @@ router.post('/stream', async (req, res) => {
     await streamClaudeResponse({
       messages: claudeMessages,
       systemPrompt,
+      model: resolvedModel,
       signal: abortController.signal,
       onToken: (token) => {
         fullResponse += token;
@@ -101,10 +155,10 @@ router.post('/stream', async (req, res) => {
           res.write(`data: ${JSON.stringify({ type: 'sentence', text: remaining, generation_id: genId, tts_mode: elevenLabsEnabled ? 'elevenlabs' : 'browser', is_final: true })}\n\n`);
         }
 
-        // Save assistant message
+        // Save assistant message with model_id
         db.prepare(
-          `INSERT INTO messages (id, conversation_id, role, content) VALUES (?, ?, ?, ?)`
-        ).run(assistantMsgId, convId, 'assistant', fullText);
+          `INSERT INTO messages (id, conversation_id, role, content, model_id) VALUES (?, ?, ?, ?, ?)`
+        ).run(assistantMsgId, convId, 'assistant', fullText, activeModelId);
 
         // Auto-generate title after first exchange
         const msgCount = db.prepare(
@@ -120,7 +174,7 @@ router.post('/stream', async (req, res) => {
           });
         }
 
-        res.write(`data: ${JSON.stringify({ type: 'complete', conversation_id: convId, generation_id: genId })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: 'complete', conversation_id: convId, generation_id: genId, model_id: activeModelId })}\n\n`);
         res.end();
         activeGenerations.delete(genId);
       },

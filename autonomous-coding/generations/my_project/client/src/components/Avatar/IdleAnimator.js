@@ -12,6 +12,8 @@ export class IdleAnimator {
     };
     this.lastTime = performance.now();
     this.intensity = 1.0; // 0=suppressed, 1=full
+    this.baseIntensity = 1.0; // set by setIntensityLevel
+    this.isSpeaking = false;
   }
 
   /**
@@ -41,7 +43,19 @@ export class IdleAnimator {
 
   /** Suppress animations during speaking (to avoid conflict with lip-sync) */
   setSpeaking(isSpeaking) {
-    this.intensity = isSpeaking ? 0.2 : 1.0;
+    this.intensity = isSpeaking ? 0.2 * this.baseIntensity : this.baseIntensity;
+  }
+
+  /**
+   * Set the idle animation intensity from settings.
+   * @param {number} level - 0 (subtle), 1 (medium), 2 (lively)
+   */
+  setIntensityLevel(level) {
+    const levels = [0.3, 1.0, 1.8];
+    this.baseIntensity = levels[level] ?? 1.0;
+    if (!this.isSpeaking) {
+      this.intensity = this.baseIntensity;
+    }
   }
 
   _updateBlink(delta) {
