@@ -1,6 +1,7 @@
 {
   "project": "Digital Human AI Companion",
   "description": "Browser-based AI companion with 2D animated talking avatar, voice I/O, and persistent memory",
+  "spec_checksum": "ae9c1fadd9b31c78559953e9d0e57f5ba15d21e84f4b4f124276d12d307d8bb8",
   "features": [
     {
       "id": 1,

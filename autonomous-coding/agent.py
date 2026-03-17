@@ -12,8 +12,8 @@ from typing import Optional
 from claude_code_sdk import ClaudeSDKClient
 
 from client import create_client
-from progress import print_session_header, print_progress_summary
-from prompts import get_initializer_prompt, get_coding_prompt, copy_spec_to_project
+from progress import print_session_header, print_progress_summary, check_spec_changed
+from prompts import get_initializer_prompt, get_coding_prompt, get_spec_sync_prompt, copy_spec_to_project, get_spec_checksum
 
 
 # Configuration
@@ -130,6 +130,10 @@ async def run_autonomous_agent(
     tests_file = project_dir / "feature_list.json"
     is_first_run = not tests_file.exists()
 
+    # Always sync the spec copy so the project directory is up to date
+    copy_spec_to_project(project_dir)
+    current_checksum = get_spec_checksum()
+
     if is_first_run:
         print("Fresh start - will use initializer agent")
         print()
@@ -139,11 +143,15 @@ async def run_autonomous_agent(
         print("  This may appear to hang - it's working. Watch for [Tool: ...] output.")
         print("=" * 70)
         print()
-        # Copy the app spec into the project directory for the agent to read
-        copy_spec_to_project(project_dir)
     else:
         print("Continuing existing project")
         print_progress_summary(project_dir)
+        if check_spec_changed(project_dir, current_checksum):
+            print()
+            print("=" * 70)
+            print("  SPEC CHANGE DETECTED — running spec sync before coding")
+            print("=" * 70)
+            print()
 
     # Main loop
     iteration = 0
@@ -172,6 +180,8 @@ async def run_autonomous_agent(
         if is_first_run:
             prompt = get_initializer_prompt()
             is_first_run = False  # Only use initializer once
+        elif check_spec_changed(project_dir, current_checksum):
+            prompt = get_spec_sync_prompt()
         else:
             prompt = get_coding_prompt()
 

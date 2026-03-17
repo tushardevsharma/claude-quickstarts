@@ -9,6 +9,29 @@ import json
 from pathlib import Path
 
 
+def check_spec_changed(project_dir: Path, current_checksum: str) -> bool:
+    """Return True if app_spec.txt has changed since feature_list.json was last synced.
+
+    Reads the stored checksum from feature_list.json's top-level "spec_checksum"
+    field and compares it to current_checksum.  Returns True (spec changed) when:
+    - feature_list.json does not exist yet
+    - the "spec_checksum" field is missing
+    - the stored checksum differs from current_checksum
+    """
+    tests_file = project_dir / "feature_list.json"
+    if not tests_file.exists():
+        return True
+    try:
+        data = json.loads(tests_file.read_text())
+        if isinstance(data, list):
+            # Old bare-list format — no checksum stored, treat as changed
+            return True
+        stored = data.get("spec_checksum", "")
+        return stored != current_checksum
+    except (json.JSONDecodeError, IOError):
+        return True
+
+
 def count_passing_tests(project_dir: Path) -> tuple[int, int]:
     """
     Count passing and total tests in feature_list.json.
