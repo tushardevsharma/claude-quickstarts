@@ -191,7 +191,8 @@ function CompanionApp({ sharedAudioRef }) {
         { id: `temp-${uuidv4()}`, role: 'user', content: text.trim(), created_at: new Date().toISOString() },
       ]);
 
-      sendMessage(text.trim(), convId);
+      // Pass activeModel so pipeline can apply per-model thinking timeout — #54
+      sendMessage(text.trim(), convId, activeModel);
     },
     [activeConvIdRef, sendMessage]
   );

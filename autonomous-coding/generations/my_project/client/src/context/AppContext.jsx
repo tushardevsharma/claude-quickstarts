@@ -1,6 +1,7 @@
 import { createContext, useContext, useReducer, useEffect } from 'react';
 import { getSettings, updateSettings, listModels } from '../services/api.js';
 import { connectWebSocket, sendWsMessage, addWsListener, disconnectWebSocket } from '../services/websocket.js';
+import { connectTtsWebSocket, disconnectTtsWebSocket } from '../services/ttsWebSocket.js';
 
 const AppContext = createContext(null);
 
@@ -113,6 +114,9 @@ export function AppProvider({ children }) {
     // Connect WebSocket for real-time model switching — #54-57, #82
     connectWebSocket();
 
+    // Connect TTS WebSocket at startup for pre-warm — #99
+    connectTtsWebSocket();
+
     // Handle model_switched ACK from server — #55
     const removeListener = addWsListener((msg) => {
       if (msg.type === 'model_switched') {
@@ -123,6 +127,7 @@ export function AppProvider({ children }) {
     return () => {
       removeListener();
       disconnectWebSocket();
+      disconnectTtsWebSocket();
     };
   }, []);
 

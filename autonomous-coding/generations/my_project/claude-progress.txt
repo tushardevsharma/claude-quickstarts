@@ -19,7 +19,7 @@ ARCHITECTURE
 - AI: AWS Bedrock (Claude 3.5/4.x family) via @aws-sdk/client-bedrock-runtime
 - TTS: ElevenLabs (browser Web Speech API fallback)
 - STT: Browser SpeechRecognition API (Deepgram fallback available)
-- WebSocket: ws package, path /ws, with Vite proxy and auto-reconnect
+- WebSocket: ws package (noServer:true), manual routing /ws + /ws/tts, Vite proxy, auto-reconnect
 
 KEY FILES
 ---------
@@ -40,6 +40,7 @@ client/src/
   context/PipelineContext.jsx         - State machine with CONNECTING/INTERRUPTED + expressions
   services/api.js                     - SSE stream client + REST API helpers
   services/websocket.js               - WebSocket client w/ auto-reconnect exponential backoff
+  services/ttsWebSocket.js            - Pre-warm TTS WebSocket at /ws/tts; ElevenLabs audio chunks
 
 server/
   index.js                 - Express entry + WebSocket server for real-time model switching
@@ -63,8 +64,9 @@ Session 3 additions:  15 new → 65/100 passing (#51-53, #59, #62-68, #71-78)
 Session 4 additions:  14 new → 79/100 passing (#58, #60, #61, #79, #83, #86, #87, #91-97)
 Session 5 additions:   7 new → 86/100 passing (#80, #81, #85, #88, #89, #90, #100)
 Session 6 additions:   7 new → 93/100 passing (#55, #56, #57, #69, #70, #82, #84)
+Session 7 additions:   3 new → 96/100 passing (#54, #98, #99)
 
-CURRENT STATUS: 93/100 passing
+CURRENT STATUS: 96/100 passing
 
 SESSION 4 WORK (2026-03-17)
 -----------------------------
@@ -138,7 +140,7 @@ NEW: client/src/services/websocket.js
   - isWsConnected(), disconnectWebSocket()
 
 UPDATED: server/index.js
-  - WebSocketServer({ server: httpServer, path: '/ws' })
+  - WebSocketServer({ server: httpServer, path: '/ws' }) — updated in session 7 to noServer:true
   - Handles model_switch: updates active_model in DB; updates model+scope if all_new_convs
   - Sends model_switched ACK immediately after DB update
   - Sends ws_ready on connection; health endpoint includes websocket: true
@@ -160,18 +162,49 @@ UPDATED: client/src/components/Voice/MicrophoneManager.jsx
   - network/service-unavailable/language-not-supported → "Voice input temporarily unavailable"
   - audio-capture → "No microphone detected. Please connect a microphone."
 
-STILL NOT PASSING (7 remaining)
+SESSION 7 WORK (2026-03-17)
+-----------------------------
+Fixed TTS WebSocket routing and verified per-model thinking timeout, live captions, and pre-warm WS.
+
+FIXED: server/index.js
+  - Switched both WebSocketServer instances to noServer:true with single manual upgrade router
+  - Previous hybrid approach (path:'/ws' on wss) caused ws library to send 400 for /ws/tts before
+    our manual handler could claim the socket
+  - New approach: httpServer.on('upgrade') routes /ws/tts → ttswss, /ws → wss, others → socket.destroy()
+  - Verified: [WS] Client connected + [WS/TTS] Client connected (pre-warm) both appear in server logs
+
+NEW: client/src/services/ttsWebSocket.js
+  - connectTtsWebSocket(): pre-warm WebSocket at /ws/tts on app startup
+  - Auto-reconnect with exponential backoff (1s/2s/.../30s max)
+  - sendTTSRequest(text, voiceId): sends tts_request over persistent WS; resolves browser-TTS fallback
+  - addTtsWsListener(fn): pub/sub for tts_audio_chunk, tts_ready, tts_start/end events
+  - 5s timeout fallback to browser TTS if WS doesn't respond
+
+UPDATED: client/src/context/AppContext.jsx
+  - connectTtsWebSocket() on mount; disconnectTtsWebSocket() on unmount
+
+UPDATED: client/src/context/PipelineContext.jsx
+  - Per-model thinking timeouts: Haiku=3s, Sonnet=5s, Opus=8s (THINKING_TIMEOUTS map)
+  - thinkingTimerRef: starts on sendMessage, cancelled on first token/sentence/error/interrupt
+  - captionText state + captionWordsRef queue for word-by-word reveal at 380ms/word (~150 wpm)
+  - startCaptionReveal() / stopCaptionReveal(): interval-based word reveal during SPEAKING
+  - onAudioComplete(): flushes remaining caption words immediately when audio ends
+  - APPEND_CAPTION reducer action; CLEAR_TEXT also resets captionText
+
+UPDATED: client/src/components/Chat/TranscriptPanel.jsx
+  - During SPEAKING: shows captionText (audio-synchronized) via StreamingMessage
+  - captionText added to auto-scroll deps
+
+UPDATED: client/src/App.jsx
+  - Passes activeModel to sendMessage() for per-model timeout calculation
+
+STILL NOT PASSING (4 remaining)
 ---------------------------------
 Voice hardware (require physical microphone testing):
   #19 Voice Activity Detection
   #20 Speech-to-Text Transcription
   #21 Microphone Toggle Off
   #22 Barge-In Interrupt
-
-Complex integrations:
-  #54 Per-Model Thinking Timeout (Haiku 3s/Sonnet 5s/Opus 8s enforced in code)
-  #98 Live captions with audio sync (word-by-word synchronized to TTS playback)
-  #99 Pre-warm TTS WebSocket connection (ElevenLabs WS pre-connection)
 
 NOTABLE TECHNICAL DECISIONS
 -----------------------------
@@ -212,6 +245,7 @@ npm --prefix client run dev
 
 GIT LOG (recent)
 ----------------
+[session 7 commit pending]
 [session 6 commit pending]
 4d97279 feat: implement multi-model switching, expanded settings, model badge
 fae2c2c feat: switch TTS from browser speech synthesis to ElevenLabs

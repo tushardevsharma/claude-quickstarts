@@ -32,6 +32,7 @@ import settingsRoutes from './routes/settings.js';
 import personaRoutes from './routes/personas.js';
 import modelRoutes from './routes/models.js';
 import { logConfig as logClaudeConfig } from './services/claude.js';
+import { isElevenLabsConfigured, synthesizeElevenLabs } from './services/tts.js';
 
 logClaudeConfig();
 
@@ -39,9 +40,32 @@ const PORT = process.env.PORT || 3000;
 const app = express();
 const httpServer = createServer(app);
 
-// ── WebSocket Server ───────────────────────────────────────────────────────────
-// Handles real-time model switching (#54-#57) and auto-reconnect (#82).
-const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
+// ── WebSocket Servers ─────────────────────────────────────────────────────────
+// Both servers use noServer:true so a single manual upgrade handler can route:
+//   /ws     → wss    (real-time model switching — #54-#57, #82)
+//   /ws/tts → ttswss (pre-warmed TTS connection  — #99)
+//
+// Using `noServer: true` for both prevents the ws library from registering its
+// own upgrade listener (which would 400-reject any path it doesn't own before
+// our handler can claim it).
+const wss = new WebSocketServer({ noServer: true });
+const ttswss = new WebSocketServer({ noServer: true });
+
+// Single upgrade router — must be registered before any ws internal listeners
+httpServer.on('upgrade', (request, socket, head) => {
+  const url = request.url || '';
+  if (url === '/ws/tts' || url.startsWith('/ws/tts?')) {
+    ttswss.handleUpgrade(request, socket, head, (ws) => {
+      ttswss.emit('connection', ws, request);
+    });
+  } else if (url === '/ws' || url.startsWith('/ws?')) {
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit('connection', ws, request);
+    });
+  } else {
+    socket.destroy();
+  }
+});
 
 wss.on('connection', (ws) => {
   console.log('[WS] Client connected');
@@ -98,6 +122,60 @@ wss.on('connection', (ws) => {
   ws.send(JSON.stringify({ type: 'ws_ready' }));
 });
 
+ttswss.on('connection', (ws) => {
+  console.log('[WS/TTS] Client connected (pre-warm)');
+
+  // Send tts_ready immediately so client knows the connection is live — #99
+  ws.send(JSON.stringify({ type: 'tts_ready', elevenlabs: isElevenLabsConfigured() }));
+
+  ws.on('message', (data) => {
+    let msg;
+    try {
+      msg = JSON.parse(data.toString());
+    } catch {
+      return;
+    }
+
+    if (msg.type === 'tts_request' && msg.text) {
+      const requestId = msg.request_id || Date.now().toString();
+
+      if (isElevenLabsConfigured()) {
+        // Stream ElevenLabs audio back as binary chunks
+        const chunks = [];
+        synthesizeElevenLabs(
+          msg.text,
+          msg.voice_id || null,
+          (chunk) => {
+            chunks.push(chunk);
+          },
+          () => {
+            // Send all chunks as a single binary message
+            const combined = Buffer.concat(chunks);
+            ws.send(JSON.stringify({ type: 'tts_start', request_id: requestId }));
+            ws.send(combined, { binary: true });
+            ws.send(JSON.stringify({ type: 'tts_end', request_id: requestId }));
+          },
+          (err) => {
+            console.error('[WS/TTS] ElevenLabs error:', err.message);
+            ws.send(JSON.stringify({ type: 'tts_error', request_id: requestId, message: err.message }));
+          }
+        );
+      } else {
+        // No TTS configured — tell client to use browser TTS
+        ws.send(JSON.stringify({ type: 'tts_use_browser', request_id: requestId, text: msg.text }));
+      }
+    }
+  });
+
+  ws.on('close', () => {
+    console.log('[WS/TTS] Client disconnected');
+  });
+
+  ws.on('error', (err) => {
+    console.warn('[WS/TTS] Socket error:', err.message);
+  });
+});
+
 // ── HTTP Middleware ────────────────────────────────────────────────────────────
 app.use(cors({
   origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
@@ -129,6 +207,7 @@ app.get('/api/health', (req, res) => {
       deepgram: !!(process.env.DEEPGRAM_API_KEY),
       bedrock: useBedrock,
       websocket: true,
+      tts_websocket: true,
     },
   });
 });

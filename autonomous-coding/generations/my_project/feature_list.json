@@ -774,7 +774,7 @@
         "Switch to Opus and send a complex message; verify 'Thinking...' indicator persists for at least 7 seconds without triggering an error state",
         "Verify the error state only appears after the model's timeout threshold is exceeded"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 55,
@@ -1424,7 +1424,7 @@
         "Verify the caption timing matches the audio (words appear when spoken, not earlier)",
         "Take screenshot mid-caption"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 99,
@@ -1438,7 +1438,7 @@
         "Send a message and verify the TTS WebSocket does not reconnect — the existing connection is reused",
         "Send a second message and confirm the same connection is still in use"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 100,

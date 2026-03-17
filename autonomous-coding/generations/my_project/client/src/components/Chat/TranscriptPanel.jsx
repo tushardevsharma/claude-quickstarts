@@ -86,7 +86,7 @@ function StreamingMessage({ text, isInterrupted }) {
 
 export default function TranscriptPanel({ messages, isCollapsed, onToggle }) {
   const scrollRef = useRef(null);
-  const { currentText, partialText, avatarState } = usePipeline();
+  const { currentText, captionText, partialText, avatarState } = usePipeline();
   const { captionFontSize } = useApp();
   const fontSizeClass = { small: 'text-xs', medium: 'text-sm', large: 'text-base' }[captionFontSize] || 'text-sm';
 
@@ -95,7 +95,7 @@ export default function TranscriptPanel({ messages, isCollapsed, onToggle }) {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, currentText, partialText]);
+  }, [messages, currentText, captionText, partialText]);
 
   if (isCollapsed) {
     return (
@@ -113,8 +113,12 @@ export default function TranscriptPanel({ messages, isCollapsed, onToggle }) {
     );
   }
 
+  // During THINKING/CONNECTING: show currentText (real-time streaming)
+  // During SPEAKING: show captionText (audio-synchronized, word-by-word) — #98
   const isActivelyStreaming =
-    (avatarState === STATES.THINKING || avatarState === STATES.SPEAKING || avatarState === STATES.CONNECTING) && currentText;
+    (avatarState === STATES.THINKING || avatarState === STATES.CONNECTING) && currentText;
+  const isSpeakingWithCaption =
+    avatarState === STATES.SPEAKING && captionText;
 
   // Show interrupted partial text with interrupted styling — #96
   const isInterrupted = avatarState === STATES.INTERRUPTED && partialText;
@@ -143,7 +147,7 @@ export default function TranscriptPanel({ messages, isCollapsed, onToggle }) {
         className={`overflow-y-auto p-3 space-y-1 max-h-48 ${fontSizeClass}`}
         style={{ scrollBehavior: 'smooth' }}
       >
-        {messages.length === 0 && !isActivelyStreaming && !isInterrupted ? (
+        {messages.length === 0 && !isActivelyStreaming && !isSpeakingWithCaption && !isInterrupted ? (
           <div className="text-center py-6 text-sm text-gray-400 dark:text-gray-600">
             Start a conversation...
           </div>
@@ -152,10 +156,14 @@ export default function TranscriptPanel({ messages, isCollapsed, onToggle }) {
             {messages.map((msg) => (
               <MessageBubble key={msg.id || msg.tempId} message={msg} />
             ))}
-            {/* Active streaming preview */}
+            {/* Thinking/Connecting: show real-time streaming text */}
             {isActivelyStreaming && <StreamingMessage text={currentText} isInterrupted={false} />}
+            {/* Speaking: show audio-synchronized caption text — #98 */}
+            {isSpeakingWithCaption && !isActivelyStreaming && (
+              <StreamingMessage text={captionText} isInterrupted={false} />
+            )}
             {/* Interrupted partial text (orange styling) — #96 */}
-            {isInterrupted && !isActivelyStreaming && (
+            {isInterrupted && !isActivelyStreaming && !isSpeakingWithCaption && (
               <StreamingMessage text={partialText} isInterrupted={true} />
             )}
           </>
