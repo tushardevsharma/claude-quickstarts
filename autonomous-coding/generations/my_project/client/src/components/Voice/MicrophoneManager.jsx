@@ -76,7 +76,8 @@ export default function MicrophoneManager({ enabled, onTranscript, onStateChange
         // Normal - just restart
         return;
       }
-      if (event.error === 'not-allowed') {
+
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
         const errMsg = 'Microphone permission denied. Please allow microphone access in your browser settings.';
         setError(errMsg);
         setIsListening(false);
@@ -85,6 +86,27 @@ export default function MicrophoneManager({ enabled, onTranscript, onStateChange
         if (onPermissionDenied) onPermissionDenied(errMsg);
         return;
       }
+
+      // STT service down or unavailable — graceful fallback to text input — #84
+      if (event.error === 'network' || event.error === 'service-unavailable' || event.error === 'language-not-supported') {
+        const errMsg = 'Voice input temporarily unavailable. Please use text input.';
+        setError(errMsg);
+        setIsListening(false);
+        if (onStateChange) onStateChange('error');
+        if (onPermissionDenied) onPermissionDenied(errMsg);
+        return;
+      }
+
+      if (event.error === 'audio-capture') {
+        const errMsg = 'No microphone detected. Please connect a microphone and try again.';
+        setError(errMsg);
+        setIsListening(false);
+        if (onStateChange) onStateChange('error');
+        if (onPermissionDenied) onPermissionDenied(errMsg);
+        return;
+      }
+
+      // Other errors: log but allow auto-restart
       console.warn('[Mic] Recognition error:', event.error);
     };
 

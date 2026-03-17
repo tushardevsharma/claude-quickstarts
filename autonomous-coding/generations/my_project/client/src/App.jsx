@@ -41,7 +41,7 @@ function ModelBadge({ modelId }) {
 }
 
 function CompanionApp({ sharedAudioRef }) {
-  const { volume, showTranscript, activeModel, showModelIndicator } = useApp();
+  const { volume, showTranscript, activeModel, showModelIndicator, inputMode, pushToTalk, isSettingsLoaded } = useApp();
   const { avatarState, error, sendMessage, interrupt, clearError, retryLastMessage, registerAudioPlayer, onAudioComplete, setMicEnabled } = usePipeline();
 
   // UI state
@@ -86,6 +86,45 @@ function CompanionApp({ sharedAudioRef }) {
       sharedAudioRef.current.setVolume(volume / 100);
     }
   }, [volume, sharedAudioRef]);
+
+  // ── Auto-enable mic when default input mode is 'voice' — #69 ────────────
+  useEffect(() => {
+    if (isSettingsLoaded && inputMode === 'voice' && !micEnabled && !pushToTalk) {
+      setMicEnabledLocal(true);
+      setMicEnabled(true);
+    }
+  }, [isSettingsLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Push-to-talk: hold spacebar to activate mic — #70 ────────────────────
+  useEffect(() => {
+    if (!pushToTalk) return;
+    let isHolding = false;
+
+    const handleKeyDown = (e) => {
+      if (e.code !== 'Space' || e.repeat || isHolding) return;
+      // Don't intercept when typing in input fields
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      e.preventDefault();
+      isHolding = true;
+      setMicEnabledLocal(true);
+      setMicEnabled(true);
+    };
+
+    const handleKeyUp = (e) => {
+      if (e.code !== 'Space' || !isHolding) return;
+      e.preventDefault();
+      isHolding = false;
+      setMicEnabledLocal(false);
+      setMicEnabled(false);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [pushToTalk, setMicEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Load conversations on mount ──────────────────────────────────────────
   useEffect(() => {

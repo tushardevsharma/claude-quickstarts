@@ -1,5 +1,6 @@
-import { createContext, useContext, useReducer, useEffect, useState } from 'react';
+import { createContext, useContext, useReducer, useEffect } from 'react';
 import { getSettings, updateSettings, listModels } from '../services/api.js';
+import { connectWebSocket, sendWsMessage, addWsListener, disconnectWebSocket } from '../services/websocket.js';
 
 const AppContext = createContext(null);
 
@@ -97,7 +98,7 @@ function reducer(state, action) {
 export function AppProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initialState);
 
-  // Load settings and models on mount
+  // Load settings and models on mount; connect WebSocket
   useEffect(() => {
     Promise.all([
       getSettings().catch(() => ({ settings: {} })),
@@ -108,6 +109,21 @@ export function AppProvider({ children }) {
         dispatch({ type: 'SET_AVAILABLE_MODELS', payload: models });
       }
     });
+
+    // Connect WebSocket for real-time model switching — #54-57, #82
+    connectWebSocket();
+
+    // Handle model_switched ACK from server — #55
+    const removeListener = addWsListener((msg) => {
+      if (msg.type === 'model_switched') {
+        dispatch({ type: 'SET_ACTIVE_MODEL', payload: msg.model_id });
+      }
+    });
+
+    return () => {
+      removeListener();
+      disconnectWebSocket();
+    };
   }, []);
 
   // Apply theme to document
@@ -159,9 +175,16 @@ export function AppProvider({ children }) {
   const setActiveModel = (modelId, scope) => {
     dispatch({ type: 'SET_ACTIVE_MODEL', payload: modelId });
     const effectiveScope = scope || state.modelSwitchingScope;
-    updateSettings({ active_model: modelId, model: modelId }).catch(console.warn);
-    if (effectiveScope === 'all_new_conversations') {
-      updateSettings({ model: modelId }).catch(console.warn);
+
+    // Send via WebSocket for real-time model switching — #54
+    const sent = sendWsMessage({ type: 'model_switch', model_id: modelId, scope: effectiveScope });
+
+    // Fallback to HTTP settings if WebSocket not connected
+    if (!sent) {
+      updateSettings({ active_model: modelId, model: modelId }).catch(console.warn);
+      if (effectiveScope === 'all_new_conversations') {
+        updateSettings({ model: modelId }).catch(console.warn);
+      }
     }
   };
 

@@ -24,7 +24,8 @@ try {
 import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
-import { initDatabase } from './db/database.js';
+import { WebSocketServer } from 'ws';
+import { initDatabase, getDatabase } from './db/database.js';
 import chatRoutes from './routes/chat.js';
 import conversationRoutes from './routes/conversations.js';
 import settingsRoutes from './routes/settings.js';
@@ -38,7 +39,66 @@ const PORT = process.env.PORT || 3000;
 const app = express();
 const httpServer = createServer(app);
 
-// Middleware
+// ── WebSocket Server ───────────────────────────────────────────────────────────
+// Handles real-time model switching (#54-#57) and auto-reconnect (#82).
+const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
+
+wss.on('connection', (ws) => {
+  console.log('[WS] Client connected');
+
+  ws.on('message', (data) => {
+    try {
+      const msg = JSON.parse(data.toString());
+
+      // model_switch: client requests a model change — #54
+      if (msg.type === 'model_switch') {
+        const { model_id, scope } = msg;
+        if (!model_id) return;
+
+        const db = getDatabase();
+
+        // Update active_model setting — #56 (new messages use new model immediately)
+        db.prepare(
+          "INSERT OR REPLACE INTO settings (key, value) VALUES ('active_model', ?)"
+        ).run(JSON.stringify(model_id));
+
+        // If scope is all_new_conversations, update default model too — #57
+        if (scope === 'all_new_conversations') {
+          db.prepare(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('model', ?)"
+          ).run(JSON.stringify(model_id));
+          db.prepare(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('model_switching_scope', ?)"
+          ).run(JSON.stringify(scope));
+        }
+
+        // ACK with model_switched — #55
+        ws.send(JSON.stringify({
+          type: 'model_switched',
+          model_id,
+          scope: scope || 'this_conversation',
+        }));
+
+        console.log(`[WS] Model switched to ${model_id} (scope: ${scope || 'this_conversation'})`);
+      }
+    } catch (err) {
+      console.warn('[WS] Message parse error:', err.message);
+    }
+  });
+
+  ws.on('close', () => {
+    console.log('[WS] Client disconnected');
+  });
+
+  ws.on('error', (err) => {
+    console.warn('[WS] Socket error:', err.message);
+  });
+
+  // Send initial hello so client knows connection is live
+  ws.send(JSON.stringify({ type: 'ws_ready' }));
+});
+
+// ── HTTP Middleware ────────────────────────────────────────────────────────────
 app.use(cors({
   origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
   credentials: true,
@@ -68,6 +128,7 @@ app.get('/api/health', (req, res) => {
       elevenlabs: !!(process.env.ELEVENLABS_API_KEY),
       deepgram: !!(process.env.DEEPGRAM_API_KEY),
       bedrock: useBedrock,
+      websocket: true,
     },
   });
 });
@@ -76,6 +137,7 @@ app.get('/api/health', (req, res) => {
 httpServer.listen(PORT, () => {
   console.log(`[Server] Digital Human Companion running on port ${PORT}`);
   console.log(`[Server] Health: http://localhost:${PORT}/api/health`);
+  console.log(`[Server] WebSocket: ws://localhost:${PORT}/ws`);
 
   const useBedrock = process.env.CLAUDE_CODE_USE_BEDROCK === '1';
   if (useBedrock) {

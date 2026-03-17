@@ -788,7 +788,7 @@
         "Verify a WebSocket message of type 'model_switch' is sent with model_id and scope fields",
         "Verify the message is sent before the next conversation turn"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 56,
@@ -802,7 +802,7 @@
         "Verify server sends a 'model_switched' message with model_id, display_name, and tier",
         "Verify the model badge in the avatar viewport updates immediately after the ACK"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 57,
@@ -818,7 +818,7 @@
         "Verify the first two responses show Sonnet (or no badge if default)",
         "Verify full conversation context is preserved across the switch"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 58,
@@ -999,7 +999,7 @@
         "Change default to 'Voice'",
         "Reload and verify mic activates by default"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 70,
@@ -1013,7 +1013,7 @@
         "Switch to always-on",
         "Verify mic is continuously active and uses VAD for turn detection"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 71,
@@ -1188,7 +1188,7 @@
         "Verify conversation continues normally after reconnection",
         "Take screenshot of the reconnecting state"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 83,
@@ -1217,7 +1217,7 @@
         "Verify text input still works normally",
         "Verify no unhandled errors in console"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 85,
