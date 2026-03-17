@@ -37,13 +37,22 @@ BUILTIN_TOOLS = [
 ]
 
 
-def create_client(project_dir: Path, model: str) -> ClaudeSDKClient:
+def create_client(
+    project_dir: Path,
+    model: str,
+    *,
+    use_bedrock: bool = False,
+    aws_region: str | None = None,
+) -> ClaudeSDKClient:
     """
     Create a Claude Agent SDK client with multi-layered security.
 
     Args:
         project_dir: Directory for the project
-        model: Claude model to use
+        model: Claude model to use (use Bedrock model IDs when use_bedrock=True,
+               e.g. us.anthropic.claude-sonnet-4-6 or anthropic.claude-sonnet-4-5-20250929-v1:0)
+        use_bedrock: If True, use AWS Bedrock instead of Anthropic API (requires AWS credentials).
+        aws_region: AWS region for Bedrock (defaults to AWS_REGION env or us-east-1).
 
     Returns:
         Configured ClaudeSDKClient
@@ -54,12 +63,24 @@ def create_client(project_dir: Path, model: str) -> ClaudeSDKClient:
     3. Security hooks - Bash commands validated against an allowlist
        (see security.py for ALLOWED_COMMANDS)
     """
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise ValueError(
-            "ANTHROPIC_API_KEY environment variable not set.\n"
-            "Get your API key from: https://console.anthropic.com/"
-        )
+    if use_bedrock:
+        region = aws_region or os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "us-east-1"
+        bedrock_env = {
+            "CLAUDE_CODE_USE_BEDROCK": "1",
+            "AWS_REGION": region,
+        }
+        # Optional: pass through Bedrock API key if set (simpler auth without full AWS creds)
+        if bearer := os.environ.get("AWS_BEARER_TOKEN_BEDROCK"):
+            bedrock_env["AWS_BEARER_TOKEN_BEDROCK"] = bearer
+        claude_env = bedrock_env
+    else:
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise ValueError(
+                "ANTHROPIC_API_KEY environment variable not set.\n"
+                "Get your API key from: https://console.anthropic.com/"
+            )
+        claude_env = {}
 
     # Create comprehensive security settings
     # Note: Using relative paths ("./**") restricts access to project directory
@@ -93,6 +114,9 @@ def create_client(project_dir: Path, model: str) -> ClaudeSDKClient:
         json.dump(security_settings, f, indent=2)
 
     print(f"Created security settings at {settings_file}")
+    if use_bedrock:
+        print("   - Provider: AWS Bedrock")
+        print(f"   - Region: {claude_env.get('AWS_REGION', 'N/A')}")
     print("   - Sandbox enabled (OS-level bash isolation)")
     print(f"   - Filesystem restricted to: {project_dir.resolve()}")
     print("   - Bash commands restricted to allowlist (see security.py)")
@@ -118,5 +142,6 @@ def create_client(project_dir: Path, model: str) -> ClaudeSDKClient:
             max_turns=1000,
             cwd=str(project_dir.resolve()),
             settings=str(settings_file.resolve()),  # Use absolute path
+            env=claude_env,
         )
     )

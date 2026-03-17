@@ -98,14 +98,19 @@ async def run_autonomous_agent(
     project_dir: Path,
     model: str,
     max_iterations: Optional[int] = None,
+    *,
+    use_bedrock: bool = False,
+    aws_region: Optional[str] = None,
 ) -> None:
     """
     Run the autonomous agent loop.
 
     Args:
         project_dir: Directory for the project
-        model: Claude model to use
+        model: Claude model to use (use Bedrock model IDs when use_bedrock=True)
         max_iterations: Maximum number of iterations (None for unlimited)
+        use_bedrock: If True, use AWS Bedrock (requires AWS credentials).
+        aws_region: AWS region for Bedrock (defaults to AWS_REGION env or us-east-1).
     """
     print("\n" + "=" * 70)
     print("  AUTONOMOUS CODING AGENT DEMO")
@@ -156,7 +161,12 @@ async def run_autonomous_agent(
         print_session_header(iteration, is_first_run)
 
         # Create client (fresh context)
-        client = create_client(project_dir, model)
+        client = create_client(
+            project_dir,
+            model,
+            use_bedrock=use_bedrock,
+            aws_region=aws_region,
+        )
 
         # Choose prompt based on session type
         if is_first_run:

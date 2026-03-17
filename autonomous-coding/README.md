@@ -10,7 +10,9 @@ A minimal harness demonstrating long-running autonomous coding with the Claude A
 # Install Claude Code CLI (latest version required)
 npm install -g @anthropic-ai/claude-code
 
-# Install Python dependencies
+# Install Python dependencies (use a virtual environment recommended)
+python3 -m venv .venv
+source .venv/bin/activate   # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
@@ -20,15 +22,24 @@ claude --version  # Should be latest version
 pip show claude-code-sdk  # Check SDK is installed
 ```
 
-**API Key:** Set your Anthropic API key:
-```bash
-export ANTHROPIC_API_KEY='your-api-key-here'
-```
+**Authentication (choose one):**
+
+- **Anthropic API:** Set your API key:
+  ```bash
+  export ANTHROPIC_API_KEY='your-api-key-here'
+  ```
+- **AWS Bedrock:** Use the `--bedrock` flag and configure AWS credentials (e.g. `aws configure`, or `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, or `AWS_PROFILE` after `aws sso login`). Optionally set `AWS_REGION` (defaults to `us-east-1`). You can also use a [Bedrock API key](https://aws.amazon.com/blogs/machine-learning/accelerate-ai-development-with-amazon-bedrock-api-keys/) via `AWS_BEARER_TOKEN_BEDROCK`.
 
 ## Quick Start
 
+**With Anthropic API:**
 ```bash
 python autonomous_agent_demo.py --project-dir ./my_project
+```
+
+**With AWS Bedrock:**
+```bash
+python autonomous_agent_demo.py --project-dir ./my_project --bedrock
 ```
 
 For testing with limited iterations:
@@ -131,7 +142,9 @@ The application will typically be available at `http://localhost:3000` or simila
 |--------|-------------|---------|
 | `--project-dir` | Directory for the project | `./autonomous_demo_project` |
 | `--max-iterations` | Max agent iterations | Unlimited |
-| `--model` | Claude model to use | `claude-sonnet-4-5-20250929` |
+| `--model` | Claude model to use | `claude-sonnet-4-5-20250929` (Anthropic) or `us.anthropic.claude-sonnet-4-6` (Bedrock) |
+| `--bedrock` | Use AWS Bedrock instead of Anthropic API | Off |
+| `--aws-region` | AWS region for Bedrock | `AWS_REGION` env or `us-east-1` |
 
 ## Customization
 
@@ -156,7 +169,10 @@ This is normal. The initializer agent is generating 200 detailed test cases, whi
 The agent tried to run a command not in the allowlist. This is the security system working as intended. If needed, add the command to `ALLOWED_COMMANDS` in `security.py`.
 
 **"API key not set"**
-Ensure `ANTHROPIC_API_KEY` is exported in your shell environment.
+When not using Bedrock, ensure `ANTHROPIC_API_KEY` is exported. To use AWS Bedrock instead, run with `--bedrock` and set AWS credentials (e.g. `aws configure` or `AWS_PROFILE`).
+
+**Bedrock / region errors**
+Ensure your AWS account has Bedrock access and the chosen model is available in your region. Set `AWS_REGION` if needed (e.g. `us-east-1`). Use Bedrock model IDs with `--model` (e.g. `us.anthropic.claude-sonnet-4-6` or `anthropic.claude-sonnet-4-5-20250929-v1:0`).
 
 ## License
 

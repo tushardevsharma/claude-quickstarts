@@ -22,6 +22,8 @@ from agent import run_autonomous_agent
 
 # Configuration
 DEFAULT_MODEL = "claude-sonnet-4-5-20250929"
+# Default Bedrock model (cross-region inference profile; adjust for your region if needed)
+DEFAULT_BEDROCK_MODEL = "us.anthropic.claude-sonnet-4-6"
 
 
 def parse_args() -> argparse.Namespace:
@@ -34,8 +36,12 @@ Examples:
   # Start fresh project
   python autonomous_agent_demo.py --project-dir ./claude_clone
 
-  # Use a specific model
+  # Use AWS Bedrock
+  python autonomous_agent_demo.py --project-dir ./claude_clone --bedrock
+
+  # Use a specific model (or Bedrock model ID when using --bedrock)
   python autonomous_agent_demo.py --project-dir ./claude_clone --model claude-sonnet-4-5-20250929
+  python autonomous_agent_demo.py --project-dir ./claude_clone --bedrock --model us.anthropic.claude-sonnet-4-6
 
   # Limit iterations for testing
   python autonomous_agent_demo.py --project-dir ./claude_clone --max-iterations 5
@@ -43,9 +49,29 @@ Examples:
   # Continue existing project
   python autonomous_agent_demo.py --project-dir ./claude_clone
 
-Environment Variables:
-  ANTHROPIC_API_KEY    Your Anthropic API key (required)
+Environment Variables (Anthropic API):
+  ANTHROPIC_API_KEY    Your Anthropic API key (required when not using --bedrock)
+
+Environment Variables (AWS Bedrock, when using --bedrock):
+  AWS_REGION          AWS region for Bedrock (e.g. us-east-1). Defaults to us-east-1.
+  AWS_ACCESS_KEY_ID   Optional; use AWS CLI/default credential chain if unset.
+  AWS_SECRET_ACCESS_KEY
+  AWS_PROFILE         Optional; for SSO or named profile.
+  AWS_BEARER_TOKEN_BEDROCK  Optional; Bedrock API key (simpler than full AWS creds).
         """,
+    )
+
+    parser.add_argument(
+        "--bedrock",
+        action="store_true",
+        help="Use AWS Bedrock instead of Anthropic API (requires AWS credentials or AWS_BEARER_TOKEN_BEDROCK)",
+    )
+
+    parser.add_argument(
+        "--aws-region",
+        type=str,
+        default=None,
+        help="AWS region for Bedrock (default: AWS_REGION env or us-east-1). Only used with --bedrock.",
     )
 
     parser.add_argument(
@@ -76,13 +102,32 @@ def main() -> None:
     """Main entry point."""
     args = parse_args()
 
-    # Check for API key
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        print("Error: ANTHROPIC_API_KEY environment variable not set")
-        print("\nGet your API key from: https://console.anthropic.com/")
-        print("\nThen set it:")
-        print("  export ANTHROPIC_API_KEY='your-api-key-here'")
-        return
+    if args.bedrock:
+        # Bedrock: require AWS region (we default in client) and at least one auth method
+        has_creds = (
+            os.environ.get("AWS_ACCESS_KEY_ID")
+            or os.environ.get("AWS_PROFILE")
+            or os.environ.get("AWS_BEARER_TOKEN_BEDROCK")
+        )
+        if not has_creds:
+            print("Error: When using --bedrock, set AWS credentials or Bedrock API key.")
+            print("\nOptions:")
+            print("  1. AWS CLI: aws configure  (or set AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)")
+            print("  2. Profile: export AWS_PROFILE=your-profile  (e.g. after aws sso login)")
+            print("  3. Bedrock API key: export AWS_BEARER_TOKEN_BEDROCK=your-bedrock-api-key")
+            print("\nOptionally set region: export AWS_REGION=us-east-1")
+            return
+        model = args.model if args.model != DEFAULT_MODEL else DEFAULT_BEDROCK_MODEL
+    else:
+        # Anthropic API: require API key
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            print("Error: ANTHROPIC_API_KEY environment variable not set")
+            print("\nGet your API key from: https://console.anthropic.com/")
+            print("\nThen set it:")
+            print("  export ANTHROPIC_API_KEY='your-api-key-here'")
+            print("\nOr use AWS Bedrock: python autonomous_agent_demo.py --bedrock --project-dir ./my_project")
+            return
+        model = args.model
 
     # Automatically place projects in generations/ directory unless already specified
     project_dir = args.project_dir
@@ -100,8 +145,10 @@ def main() -> None:
         asyncio.run(
             run_autonomous_agent(
                 project_dir=project_dir,
-                model=args.model,
+                model=model,
                 max_iterations=args.max_iterations,
+                use_bedrock=args.bedrock,
+                aws_region=args.aws_region,
             )
         )
     except KeyboardInterrupt:
