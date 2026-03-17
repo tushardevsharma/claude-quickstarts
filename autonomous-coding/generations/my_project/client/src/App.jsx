@@ -21,7 +21,7 @@ import { v4 as uuidv4 } from './utils/uuid.js';
 
 function CompanionApp({ sharedAudioRef }) {
   const { volume, showTranscript } = useApp();
-  const { avatarState, sendMessage, interrupt, registerAudioPlayer, onAudioComplete, setMicEnabled } = usePipeline();
+  const { avatarState, error, sendMessage, interrupt, clearError, retryLastMessage, registerAudioPlayer, onAudioComplete, setMicEnabled } = usePipeline();
 
   // UI state
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -39,6 +39,9 @@ function CompanionApp({ sharedAudioRef }) {
 
   // Mouth openness for lip-sync
   const [mouthOpenness, setMouthOpenness] = useState(0);
+
+  // Persistent mic error (shown even after MicrophoneManager unmounts)
+  const [micError, setMicError] = useState(null);
 
   // ── Init audio player ────────────────────────────────────────────────────
   useEffect(() => {
@@ -153,6 +156,13 @@ function CompanionApp({ sharedAudioRef }) {
     setMicEnabled(newVal);
   };
 
+  // ── Mic permission denied ────────────────────────────────────────────────
+  const handleMicPermissionDenied = useCallback((errMsg) => {
+    setMicEnabledLocal(false);
+    setMicEnabled(false);
+    setMicError(errMsg || 'Microphone permission denied. Please allow microphone access in your browser settings.');
+  }, [setMicEnabled]);
+
   // ── New conversation ─────────────────────────────────────────────────────
   const handleNewConversation = async () => {
     interrupt();
@@ -234,7 +244,7 @@ function CompanionApp({ sharedAudioRef }) {
 
       {/* Scrollable main content */}
       <main className="flex-1 overflow-y-auto">
-        <div className="max-w-2xl mx-auto px-4 py-4 flex flex-col gap-4">
+        <div className="max-w-2xl mx-auto px-3 sm:px-4 py-4 flex flex-col gap-4">
           {/* Avatar area */}
           <div className="flex flex-col items-center gap-3">
             <div
@@ -282,7 +292,68 @@ function CompanionApp({ sharedAudioRef }) {
       />
 
       {micEnabled && (
-        <MicrophoneManager enabled={micEnabled} onTranscript={handleTranscript} />
+        <MicrophoneManager
+          enabled={micEnabled}
+          onTranscript={handleTranscript}
+          onPermissionDenied={handleMicPermissionDenied}
+        />
+      )}
+
+      {/* Mic permission error toast */}
+      {micError && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 w-full max-w-sm px-4">
+          <div className="bg-orange-600 dark:bg-orange-700 text-white rounded-xl px-4 py-3 shadow-xl flex items-start gap-3">
+            <svg className="w-5 h-5 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+            </svg>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">Microphone unavailable</p>
+              <p className="text-xs text-orange-100 mt-0.5">{micError}</p>
+              <p className="text-xs text-orange-200 mt-1">You can still use text input to chat.</p>
+            </div>
+            <button
+              onClick={() => setMicError(null)}
+              className="text-orange-200 hover:text-white flex-shrink-0 mt-0.5"
+              title="Dismiss"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Error banner */}
+      {error && avatarState === STATES.ERROR && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 w-full max-w-sm px-4">
+          <div className="bg-red-600 dark:bg-red-700 text-white rounded-xl px-4 py-3 shadow-xl flex items-start gap-3">
+            <svg className="w-5 h-5 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">Something went wrong</p>
+              <p className="text-xs text-red-100 mt-0.5 break-words">{error}</p>
+            </div>
+            <div className="flex flex-col items-end gap-1 flex-shrink-0">
+              <button
+                onClick={retryLastMessage}
+                className="text-xs bg-white/25 hover:bg-white/35 px-2 py-1 rounded-md transition-colors font-medium w-full text-center"
+                title="Retry last message"
+              >
+                Retry
+              </button>
+              <button
+                onClick={clearError}
+                className="text-xs bg-white/10 hover:bg-white/20 px-2 py-1 rounded-md transition-colors w-full text-center"
+                title="Dismiss error"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Loading overlay */}

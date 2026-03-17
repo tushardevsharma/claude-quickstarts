@@ -70,7 +70,7 @@
         "Verify no overflow or broken layout",
         "Take screenshot"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 6,
@@ -240,7 +240,7 @@
         "Verify audio stops immediately",
         "Verify avatar returns to idle state"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 18,
@@ -327,7 +327,7 @@
         "Verify avatar stops immediately",
         "Verify UI returns to ready state"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 24,
@@ -342,7 +342,7 @@
         "Send it",
         "Verify Claude responds to the new message"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 25,
@@ -617,7 +617,7 @@
         "Verify app degrades gracefully to text-only",
         "Verify text input still works"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 44,
@@ -631,7 +631,7 @@
         "Verify error is not just a console error",
         "Verify user can retry"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 45,

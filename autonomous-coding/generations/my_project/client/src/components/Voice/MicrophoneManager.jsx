@@ -5,7 +5,7 @@ import { usePipeline, STATES } from '../../context/PipelineContext.jsx';
  * MicrophoneManager: Handles microphone input with Voice Activity Detection.
  * Uses browser's Web Speech API for STT, with potential for Deepgram upgrade.
  */
-export default function MicrophoneManager({ enabled, onTranscript, onStateChange }) {
+export default function MicrophoneManager({ enabled, onTranscript, onStateChange, onPermissionDenied }) {
   const { setListening, setIdle, avatarState, interrupt } = usePipeline();
   const recognitionRef = useRef(null);
   const [isListening, setIsListening] = useState(false);
@@ -77,9 +77,12 @@ export default function MicrophoneManager({ enabled, onTranscript, onStateChange
         return;
       }
       if (event.error === 'not-allowed') {
-        setError('Microphone permission denied. Please allow microphone access.');
+        const errMsg = 'Microphone permission denied. Please allow microphone access in your browser settings.';
+        setError(errMsg);
         setIsListening(false);
         if (onStateChange) onStateChange('error');
+        // Notify parent with message so it can persist the error after unmount
+        if (onPermissionDenied) onPermissionDenied(errMsg);
         return;
       }
       console.warn('[Mic] Recognition error:', event.error);
@@ -106,7 +109,7 @@ export default function MicrophoneManager({ enabled, onTranscript, onStateChange
     } catch (err) {
       console.error('[Mic] Failed to start recognition:', err.message);
     }
-  }, [enabled, interrupt, setListening, onTranscript, onStateChange]);
+  }, [enabled, interrupt, setListening, onTranscript, onStateChange, onPermissionDenied]);
 
   const stopRecognition = useCallback(() => {
     if (restartTimerRef.current) {

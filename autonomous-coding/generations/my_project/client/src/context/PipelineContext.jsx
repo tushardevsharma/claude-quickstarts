@@ -21,6 +21,7 @@ const initialState = {
   currentText: '', // streaming text being built
   error: null,
   isMicEnabled: false,
+  lastUserMessage: null, // stored for retry after error
 };
 
 function reducer(state, action) {
@@ -35,6 +36,8 @@ function reducer(state, action) {
       return { ...state, currentText: state.currentText + action.payload };
     case 'CLEAR_TEXT':
       return { ...state, currentText: '' };
+    case 'SET_LAST_MESSAGE':
+      return { ...state, lastUserMessage: action.payload };
     case 'SET_ERROR':
       return { ...state, error: action.payload, avatarState: STATES.ERROR };
     case 'CLEAR_ERROR':
@@ -84,6 +87,7 @@ export function PipelineProvider({ children, onMessage }) {
       dispatch({ type: 'SET_STATE', payload: STATES.THINKING });
       dispatch({ type: 'CLEAR_TEXT' });
       dispatch({ type: 'CLEAR_ERROR' });
+      dispatch({ type: 'SET_LAST_MESSAGE', payload: { text, conversationId: convId } });
 
       // Notify parent about user message
       if (onMessage) {
@@ -163,7 +167,7 @@ export function PipelineProvider({ children, onMessage }) {
 
   // Interrupt current generation
   const interrupt = useCallback(async () => {
-    const { generationId, conversationId } = state;
+    const { generationId, conversationId, isMicEnabled } = state;
 
     if (streamRef.current) {
       streamRef.current.abort();
@@ -177,7 +181,8 @@ export function PipelineProvider({ children, onMessage }) {
     sentenceQueueRef.current = [];
     isSpeakingRef.current = false;
 
-    dispatch({ type: 'SET_STATE', payload: STATES.LISTENING });
+    // Return to LISTENING if mic is on, otherwise IDLE (ready for text input)
+    dispatch({ type: 'SET_STATE', payload: isMicEnabled ? STATES.LISTENING : STATES.IDLE });
 
     if (generationId) {
       try {
@@ -187,6 +192,21 @@ export function PipelineProvider({ children, onMessage }) {
       }
     }
   }, [state]);
+
+  // Clear error state and return to idle
+  const clearError = useCallback(() => {
+    dispatch({ type: 'CLEAR_ERROR' });
+    dispatch({ type: 'SET_STATE', payload: STATES.IDLE });
+  }, []);
+
+  // Retry the last failed message
+  const retryLastMessage = useCallback(() => {
+    const { lastUserMessage } = state;
+    if (!lastUserMessage) return;
+    dispatch({ type: 'CLEAR_ERROR' });
+    dispatch({ type: 'SET_STATE', payload: STATES.IDLE });
+    sendMessage(lastUserMessage.text, lastUserMessage.conversationId);
+  }, [state, sendMessage]);
 
   // Called when audio finishes playing all queued sentences
   const onAudioComplete = useCallback(() => {
@@ -217,6 +237,8 @@ export function PipelineProvider({ children, onMessage }) {
         ...state,
         sendMessage,
         interrupt,
+        clearError,
+        retryLastMessage,
         registerAudioPlayer,
         onAudioComplete,
         setMicEnabled,
