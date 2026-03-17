@@ -1,6 +1,6 @@
 Digital Human AI Companion — Build Progress
 ============================================
-Date: 2026-03-18 (Sessions 4, 5, 6, 7, 8, 9 update)
+Date: 2026-03-18 (Sessions 4, 5, 6, 7, 8, 9, 10 update)
 Build Agent: Claude (Autonomous Coding Agent)
 
 PROJECT SUMMARY
@@ -67,8 +67,9 @@ Session 6 additions:   7 new → 93/100 passing (#55, #56, #57, #69, #70, #82, #
 Session 7 additions:   3 new → 96/100 passing (#54, #98, #99)
 Session 8 additions:   0 new → 96/100 passing (verification session only)
 Session 9 additions:   0 new → 96/100 passing (verification session only)
+Session 10 additions:  1 new → 97/100 passing (#21 Microphone Toggle Off)
 
-CURRENT STATUS: 96/100 passing
+CURRENT STATUS: 97/100 passing
 
 SESSION 4 WORK (2026-03-17)
 -----------------------------
@@ -200,6 +201,27 @@ UPDATED: client/src/components/Chat/TranscriptPanel.jsx
 UPDATED: client/src/App.jsx
   - Passes activeModel to sendMessage() for per-model timeout calculation
 
+SESSION 10 WORK (2026-03-18)
+-----------------------------
+Fixed bug and verified test #21 (Microphone Toggle Off).
+
+BUG FIXED: client/src/components/Voice/MicrophoneManager.jsx
+  - stopRecognition() called onStateChange('idle') but that callback was not passed
+    from App.jsx, and setIdle() from PipelineContext was never called on mic disable.
+  - Result: the "Listening..." state indicator stayed stuck after disabling mic.
+  - Fix: added setIdle() call directly in stopRecognition() (MicrophoneManager has
+    direct access to PipelineContext via usePipeline hook).
+  - Added setIdle to the useCallback dependency array.
+
+VERIFIED: Test #21 Microphone Toggle Off (97/100)
+  1. Navigated to http://localhost:5173 ✓
+  2. Enabled microphone — blue mic icon in header, "Listening..." indicator shown ✓
+  3. Clicked mic button to disable — gray muted speaker icon shown ✓
+  4. Mic icon confirmed as muted/off ✓
+  5. State indicator cleared (no "Listening..." stuck) — confirmed with screenshot ✓
+  6. Core functionality regression check: sent "What is 5 times 7?" → Nova responded
+     "That's 35." correctly ✓
+
 SESSION 9 WORK (2026-03-18)
 -----------------------------
 Verification session - no new features implemented. Confirmed all 96 passing tests
@@ -250,13 +272,12 @@ VERIFIED WORKING:
 
 NO REGRESSIONS FOUND.
 
-STILL NOT PASSING (4 remaining)
+STILL NOT PASSING (3 remaining)
 ---------------------------------
-Voice hardware (require physical microphone testing):
-  #19 Voice Activity Detection
-  #20 Speech-to-Text Transcription
-  #21 Microphone Toggle Off
-  #22 Barge-In Interrupt
+Voice hardware (require actual speech to microphone):
+  #19 Voice Activity Detection — requires speaking into mic to trigger onspeechstart
+  #20 Speech-to-Text Transcription — requires speaking "What is the capital of France?"
+  #22 Barge-In Interrupt — requires speaking while avatar is actively speaking
 
 NOTABLE TECHNICAL DECISIONS
 -----------------------------

@@ -297,7 +297,7 @@
         "Verify mic icon shows as muted/off",
         "Verify speaking does not trigger listening state"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 22,

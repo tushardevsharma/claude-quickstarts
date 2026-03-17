@@ -144,8 +144,10 @@ export default function MicrophoneManager({ enabled, onTranscript, onStateChange
       } catch {}
     }
     setIsListening(false);
+    // Return pipeline state to IDLE when mic is disabled — fixes stuck "Listening..." indicator
+    setIdle();
     if (onStateChange) onStateChange('idle');
-  }, [onStateChange]);
+  }, [onStateChange, setIdle]);
 
   useEffect(() => {
     if (enabled) {
