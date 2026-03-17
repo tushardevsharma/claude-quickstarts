@@ -187,8 +187,10 @@ def main():
         "wget https://example.com",
         "python app.py",
         "touch file.txt",
-        "kill 12345",
         "killall node",
+        # kill with non-numeric target (blocked)
+        "kill bash",
+        "kill %1",
         # pkill with non-dev processes
         "pkill bash",
         "pkill chrome",
@@ -270,6 +272,13 @@ def main():
         # pkill with 2>/dev/null redirect
         'pkill -f "node index.js" 2>/dev/null',
         'pkill node 2>/dev/null; sleep 1 && npm start &',
+        # kill with numeric PID (allowed)
+        "kill 12345",
+        "kill -9 12345",
+        "kill -15 12345",
+        # cd (allowed)
+        "cd /project && npm install",
+        "cd client && npm run build",
     ]
 
     for cmd in safe:

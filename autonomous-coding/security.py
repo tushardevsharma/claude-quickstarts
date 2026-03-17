@@ -35,17 +35,20 @@ ALLOWED_COMMANDS = {
     "node",
     # Version control
     "git",
+    # Directory navigation
+    "cd",
     # Process management
     "ps",
     "lsof",
     "sleep",
     "pkill",  # For killing dev servers; validated separately
+    "kill",   # For killing by PID (from lsof output); validated separately
     # Script execution
     "init.sh",  # Init scripts; validated separately
 }
 
 # Commands that need additional validation even when in the allowlist
-COMMANDS_NEEDING_EXTRA_VALIDATION = {"pkill", "chmod", "init.sh", "curl"}
+COMMANDS_NEEDING_EXTRA_VALIDATION = {"pkill", "chmod", "init.sh", "curl", "kill"}
 
 
 def split_command_segments(command_string: str) -> list[str]:
@@ -213,6 +216,64 @@ def validate_pkill_command(command_string: str) -> tuple[bool, str]:
     if target in allowed_process_names:
         return True, ""
     return False, f"pkill only allowed for dev processes: {allowed_process_names}"
+
+
+def validate_kill_command(command_string: str) -> tuple[bool, str]:
+    """
+    Validate kill commands - only allow sending SIGTERM/SIGKILL to numeric PIDs.
+
+    Blocks: kill -9 bash, kill %1 (job specs), kill -s SIGKILL name
+    Allows: kill 1234, kill -9 1234, kill -15 1234
+
+    Returns:
+        Tuple of (is_allowed, reason_if_blocked)
+    """
+    import re
+
+    # Strip redirections before parsing
+    clean = re.sub(r"\d*>[&>]?\S*", "", command_string).strip()
+
+    try:
+        tokens = shlex.split(clean)
+    except ValueError:
+        return False, "Could not parse kill command"
+
+    if not tokens:
+        return False, "Empty kill command"
+
+    args = tokens[1:]  # everything after 'kill'
+
+    # Parse out signal flag if present (-9, -15, -TERM, -KILL, --signal N)
+    pids = []
+    skip_next = False
+    for token in args:
+        if skip_next:
+            # This is the signal value after --signal
+            skip_next = False
+            continue
+        if token in ("--signal", "-s"):
+            skip_next = True
+            continue
+        if token.startswith("-"):
+            # Numeric signal like -9, -15 — allowed
+            sig = token.lstrip("-")
+            if sig.isdigit():
+                continue
+            # Named signal like -TERM, -KILL — allowed
+            if re.match(r"^[A-Z]+$", sig):
+                continue
+            return False, f"Unrecognised kill flag: {token}"
+        pids.append(token)
+
+    if not pids:
+        return False, "kill requires at least one PID"
+
+    # All remaining args must be numeric PIDs — no job specs (%1), no names
+    for pid in pids:
+        if not pid.isdigit():
+            return False, f"kill only allows numeric PIDs, got: {pid!r}"
+
+    return True, ""
 
 
 def validate_chmod_command(command_string: str) -> tuple[bool, str]:
@@ -426,6 +487,10 @@ async def bash_security_hook(input_data, tool_use_id=None, context=None):
                     return {"decision": "block", "reason": reason}
             elif cmd == "curl":
                 allowed, reason = validate_curl_command(cmd_segment)
+                if not allowed:
+                    return {"decision": "block", "reason": reason}
+            elif cmd == "kill":
+                allowed, reason = validate_kill_command(cmd_segment)
                 if not allowed:
                     return {"decision": "block", "reason": reason}
 
