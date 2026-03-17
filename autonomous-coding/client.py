@@ -69,9 +69,17 @@ def create_client(
             "CLAUDE_CODE_USE_BEDROCK": "1",
             "AWS_REGION": region,
         }
-        # Optional: pass through Bedrock API key if set (simpler auth without full AWS creds)
-        if bearer := os.environ.get("AWS_BEARER_TOKEN_BEDROCK"):
-            bedrock_env["AWS_BEARER_TOKEN_BEDROCK"] = bearer
+        # Pass through AWS credential-related env vars so the SDK subprocess
+        # can resolve credentials (SSO profile, static keys, bearer token, etc.)
+        for key in (
+            "AWS_PROFILE",
+            "AWS_ACCESS_KEY_ID",
+            "AWS_SECRET_ACCESS_KEY",
+            "AWS_SESSION_TOKEN",
+            "AWS_BEARER_TOKEN_BEDROCK",
+        ):
+            if val := os.environ.get(key):
+                bedrock_env[key] = val
         claude_env = bedrock_env
     else:
         api_key = os.environ.get("ANTHROPIC_API_KEY")

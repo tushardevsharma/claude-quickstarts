@@ -26,10 +26,19 @@ def count_passing_tests(project_dir: Path) -> tuple[int, int]:
 
     try:
         with open(tests_file, "r") as f:
-            tests = json.load(f)
+            data = json.load(f)
 
-        total = len(tests)
-        passing = sum(1 for test in tests if test.get("passes", False))
+        # Support both formats: a bare list of features, or
+        # a wrapper object with a "features" key.
+        if isinstance(data, list):
+            features = data
+        elif isinstance(data, dict):
+            features = data.get("features", [])
+        else:
+            return 0, 0
+
+        total = len(features)
+        passing = sum(1 for f in features if isinstance(f, dict) and f.get("passes", False))
 
         return passing, total
     except (json.JSONDecodeError, IOError):

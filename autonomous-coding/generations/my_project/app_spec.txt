@@ -1,9 +1,9 @@
 # Digital Human AI Companion — Product Requirements Document & Technical Feature Spec
 
-**Version:** 1.0 (Draft)
+**Version:** 2.0 (Active Development)
 **Author:** Tushar (Solo Developer)
 **Date:** March 2026
-**Status:** Pre-development
+**Status:** Phase 1 complete — multi-model switching in progress
 
 ---
 
@@ -573,7 +573,8 @@ CREATE TABLE conversations (
     title TEXT,                    -- Auto-generated from first exchange
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    model TEXT DEFAULT 'claude-sonnet-4-5-20250929',
+    model TEXT DEFAULT 'claude-sonnet-4-6',  -- Model active at conversation start
+    active_model TEXT,             -- Current model (may differ from `model` after mid-session switches)
     persona_id TEXT,               -- FK to personas table
     is_archived INTEGER DEFAULT 0,
     summary TEXT                   -- Periodic conversation summary for context window management
@@ -584,6 +585,7 @@ CREATE TABLE messages (
     conversation_id TEXT NOT NULL,
     role TEXT NOT NULL,             -- 'user', 'assistant', 'system'
     content TEXT NOT NULL,          -- Full text content
+    model_id TEXT,                  -- Which model generated this (assistant turns only, e.g. 'claude-opus-4-6')
     audio_duration_ms INTEGER,      -- How long the TTS audio was (for assistant messages)
     was_interrupted INTEGER DEFAULT 0,  -- Was this response cut short?
     interrupted_at_char INTEGER,    -- Character position where interrupt occurred
@@ -657,7 +659,9 @@ Use the cheapest model (Haiku) for this — it's a background task.
 | **Display** | Theme | Light/Dark/Auto | Auto |
 | **Display** | Show transcript | Toggle | On |
 | **Display** | Caption font size | Slider | Medium |
-| **AI** | Model | Dropdown | claude-sonnet-4-5 |
+| **AI** | Active model | Dropdown (see model registry) | claude-sonnet-4-6 |
+| **AI** | Model switching scope | Toggle (this conversation / all new conversations) | This conversation |
+| **AI** | Show model indicator in UI | Toggle | On |
 | **AI** | Response style (verbose/concise) | Toggle | Concise |
 | **Privacy** | Store conversation history | Toggle | On |
 | **Privacy** | Clear all history | Button | — |
@@ -688,6 +692,104 @@ The companion's personality is defined by a persona config:
 ```
 
 **Speech patterns matter for TTS naturalness.** A system prompt that encourages shorter sentences, natural pauses, and conversational tone will produce better TTS output than one that generates essay-style paragraphs.
+
+### 9.3 Multi-Model Configuration
+
+The companion can switch between Claude models mid-session or per-conversation. This is the next major feature after the Phase 1 MVP.
+
+**Why multi-model matters for a companion:**
+- **Haiku** for quick, low-latency back-and-forth (casual conversation, quick Q&A) — cheapest, fastest
+- **Sonnet** for balanced quality and speed (default general use)
+- **Opus** for deep reasoning tasks (debugging, long writing, analysis) — most capable, slower
+
+The model choice affects perceived personality: Haiku responses feel snappier and punchier; Opus responses are richer and more considered. The avatar's "thinking" animation duration naturally reflects this.
+
+**Model Registry (server-side config):**
+
+```json
+{
+  "models": [
+    {
+      "id": "claude-haiku-4-5-20251001",
+      "display_name": "Haiku — Fast & Snappy",
+      "family": "haiku",
+      "tier": "fast",
+      "max_tokens": 4096,
+      "cost_per_1k_input": 0.00025,
+      "cost_per_1k_output": 0.00125,
+      "recommended_for": ["casual chat", "quick lookups", "low-latency sessions"],
+      "latency_profile": "low"
+    },
+    {
+      "id": "claude-sonnet-4-6",
+      "display_name": "Sonnet — Balanced",
+      "family": "sonnet",
+      "tier": "balanced",
+      "max_tokens": 8192,
+      "cost_per_1k_input": 0.003,
+      "cost_per_1k_output": 0.015,
+      "recommended_for": ["general conversation", "explanations", "default"],
+      "latency_profile": "medium",
+      "default": true
+    },
+    {
+      "id": "claude-opus-4-6",
+      "display_name": "Opus — Deep Thinker",
+      "family": "opus",
+      "tier": "powerful",
+      "max_tokens": 8192,
+      "cost_per_1k_input": 0.015,
+      "cost_per_1k_output": 0.075,
+      "recommended_for": ["complex reasoning", "coding help", "long analysis"],
+      "latency_profile": "high"
+    }
+  ],
+  "background_task_model": "claude-haiku-4-5-20251001"
+}
+```
+
+**`background_task_model`** is always Haiku regardless of the user's active model — it handles conversation title generation and periodic summaries, where speed and cost matter more than depth.
+
+**Switching Scope:**
+
+| Scope | Behavior |
+|-------|----------|
+| `this_conversation` | Model changes apply only to the current session. Next new conversation reverts to the default. |
+| `all_new_conversations` | Persisted as the new default in the `settings` table. Current conversation is unaffected. |
+| `mid_conversation` | User switches model while a conversation is in progress. The new model takes effect from the very next message. The `messages` table records which model generated each assistant turn. |
+
+**Mid-conversation model switch flow:**
+
+```
+User opens model picker → selects Opus
+  → Client sends: { type: 'model_switch', data: { model_id: 'claude-opus-4-6', scope: 'this_conversation' } }
+  → Server: updates active session model, does NOT restart conversation
+  → Server ACKs: { type: 'model_switched', data: { model_id: 'claude-opus-4-6', display_name: 'Opus — Deep Thinker' } }
+  → Client: updates model badge in UI, next message uses new model
+```
+
+**Important:** When switching mid-conversation, the full conversation history is passed to the new model — context is preserved across model changes.
+
+**Model Indicator UI:**
+
+A small persistent badge in the avatar viewport corner shows the active model tier:
+- Fast (Haiku): subtle blue dot
+- Balanced (Sonnet): subtle green dot (default, nearly invisible to not distract)
+- Powerful (Opus): subtle amber dot
+
+The badge is also shown in the transcript next to each assistant turn that used a non-default model, for reference.
+
+**Latency Expectation Adjustment:**
+
+Different models have different time-to-first-token. The avatar's "thinking" animation and the UI "Thinking..." indicator should reflect this gracefully — there is no timeout error for the first 8 seconds with Opus (vs 5 seconds for Sonnet, 3 seconds for Haiku).
+
+```javascript
+const MODEL_LATENCY_PROFILES = {
+  haiku:  { thinkingTimeout: 3000,  expectedTTFT: 300  },
+  sonnet: { thinkingTimeout: 5000,  expectedTTFT: 600  },
+  opus:   { thinkingTimeout: 8000,  expectedTTFT: 1200 },
+};
+```
 
 ---
 
@@ -722,21 +824,23 @@ The companion's personality is defined by a persona config:
 
 | Service | Purpose | Cost (estimate for personal use) |
 |---------|---------|----------------------------------|
-| Claude API (Sonnet) | Conversation intelligence | ~$3/M input tokens, ~$15/M output tokens. Personal use: $5-20/month |
+| Claude API — Haiku 4.5 | Fast conversation turns, background tasks (titles, summaries) | ~$0.25/M input, ~$1.25/M output. Very cheap; use freely. |
+| Claude API — Sonnet 4.6 | Default conversation intelligence | ~$3/M input, ~$15/M output. Personal use: $5-20/month |
+| Claude API — Opus 4.6 | Deep reasoning sessions | ~$15/M input, ~$75/M output. Use sparingly; personal use: $0-15/month depending on sessions |
 | ElevenLabs | Text-to-speech | Free tier: 10K chars/month. Starter: $5/month (30K chars). Personal use: $5-22/month |
 | Deepgram | Speech-to-text | Free tier: $200 credit. Pay-as-go: $0.0043/min. Personal use: $1-5/month |
 
-**Total estimated monthly cost: $10-45/month** depending on usage intensity.
+**Total estimated monthly cost: $10-55/month** depending on usage intensity and model mix. Heavy Opus use can push toward the top of this range.
 
 ---
 
 ## 11. Implementation Phases
 
-### Phase 1: Core Pipeline (Weeks 1-3) — THE ONLY THING THAT MATTERS
+### Phase 1: Core Pipeline (Weeks 1-3) — COMPLETE
 
 Goal: End-to-end working pipeline. User types text → Claude responds → TTS plays audio → avatar mouth moves.
 
-**Deliverables:**
+**Deliverables (done):**
 - Express server with Claude streaming proxy
 - Sentence splitter
 - ElevenLabs TTS integration (streaming)
@@ -744,15 +848,32 @@ Goal: End-to-end working pipeline. User types text → Claude responds → TTS p
 - Basic web UI with avatar viewport + text input
 - Audio playback via Web Audio API
 
-**Explicitly NOT in Phase 1:**
-- Voice input (text only)
-- Conversation persistence
-- Settings UI
-- Multiple personas
-- Mobile responsiveness
-- Polish of any kind
+### Phase 1.5: Multi-Model Switching (Current) — THE ACTIVE FOCUS
 
-**Why this scope:** If the core pipeline doesn't feel good — if latency is too high, lip-sync looks wrong, or the TTS voice is off — nothing else matters. Validate the core experience before building features around it.
+Goal: User can select between Haiku / Sonnet / Opus at any point, mid-conversation or as a default. Each model's different latency profile is handled gracefully by the avatar.
+
+**Deliverables:**
+- `config/models.json` model registry with Haiku, Sonnet, Opus entries
+- `server/services/model-registry.js` — loads registry, tracks active model per WebSocket session
+- `server/routes/models.js` — `GET /api/models` returns available models
+- DB migration: add `model_id` column to `messages`, add `active_model` column to `conversations`
+- WebSocket protocol: handle `model_switch` message, emit `model_switched` ACK
+- `client/src/components/Settings/ModelPicker.jsx` — dropdown showing tier/cost/speed tradeoffs
+- Model indicator badge on avatar viewport (colored dot: blue=fast, green=balanced, amber=powerful)
+- Per-model `thinkingTimeout` in the avatar state machine — Opus gets 8s before error, Haiku 3s
+- Background task model always pinned to Haiku (title generation, summaries) regardless of active model
+- Transcript shows model badge on assistant turns that used a non-default model
+
+**Explicitly NOT in this phase:**
+- Voice input (still text-only)
+- Settings persistence UI
+- Mobile layout
+
+**Acceptance criteria:**
+1. Switch from Sonnet → Opus mid-conversation; next assistant message uses Opus; prior messages unaffected
+2. Conversation history shows which model generated each turn
+3. Avatar "thinking" animation stays alive for up to 8s without showing an error when using Opus
+4. Switching scope `all_new_conversations` persists to settings table and survives server restart
 
 ### Phase 2: Voice Input + Interrupts (Weeks 4-5)
 
@@ -816,6 +937,7 @@ POST   /api/conversations         Create new conversation
 GET    /api/conversations/:id     Get conversation with messages
 DELETE /api/conversations/:id     Delete conversation
 GET    /api/personas              List available personas
+GET    /api/models                List available models (from model registry)
 GET    /api/settings              Get user settings
 PUT    /api/settings              Update user settings
 GET    /api/health                Health check
@@ -852,6 +974,14 @@ ws://host/ws/events              Control events (state changes, interrupts, erro
 {
   type: 'interrupt',          // User interrupted
   data: { generation_id: 'abc' }
+}
+{
+  type: 'model_switch',           // Client → Server: user selected a different model
+  data: { model_id: 'claude-opus-4-6', scope: 'this_conversation' }
+}
+{
+  type: 'model_switched',         // Server → Client: ACK after successful model switch
+  data: { model_id: 'claude-opus-4-6', display_name: 'Opus — Deep Thinker', tier: 'powerful' }
 }
 {
   type: 'error',
@@ -994,7 +1124,8 @@ digital-human/
 │   │   │   │   ├── AudioPlayer.js         # Web Audio API playback + scheduling
 │   │   │   │   └── STTClient.js           # Deepgram streaming client
 │   │   │   ├── Settings/
-│   │   │   │   └── SettingsPanel.jsx
+│   │   │   │   ├── SettingsPanel.jsx
+│   │   │   │   └── ModelPicker.jsx        # Dropdown + tier badge, emits model_switch event
 │   │   │   └── Layout/
 │   │   │       ├── Header.jsx
 │   │   │       ├── Sidebar.jsx            # Conversation history
@@ -1028,10 +1159,12 @@ digital-human/
 │   ├── routes/
 │   │   ├── chat.js                  # Chat endpoints
 │   │   ├── conversations.js         # CRUD for conversations
+│   │   ├── models.js                # GET /api/models — returns model registry
 │   │   ├── personas.js              # Persona management
 │   │   └── settings.js              # User settings
 │   ├── services/
-│   │   ├── claude.js                # Claude API client (streaming)
+│   │   ├── claude.js                # Claude API client (streaming, model-aware)
+│   │   ├── model-registry.js        # Loads/validates models.json, exposes active model per session
 │   │   ├── tts.js                   # TTS provider abstraction
 │   │   ├── tts-elevenlabs.js        # ElevenLabs-specific implementation
 │   │   ├── sentence-splitter.js     # Streaming text → sentence chunks
@@ -1044,6 +1177,8 @@ digital-human/
 │   │   └── handler.js               # WebSocket message routing
 │   └── package.json
 │
+├── config/
+│   └── models.json                  # Model registry (see Section 9.3)
 ├── .env                             # API keys (ANTHROPIC_API_KEY, ELEVENLABS_API_KEY, DEEPGRAM_API_KEY)
 └── README.md
 ```

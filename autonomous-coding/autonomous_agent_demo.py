@@ -14,6 +14,7 @@ Example Usage:
 
 import argparse
 import asyncio
+import json
 import os
 from pathlib import Path
 
@@ -24,6 +25,27 @@ from agent import run_autonomous_agent
 DEFAULT_MODEL = "claude-sonnet-4-5-20250929"
 # Default Bedrock model (cross-region inference profile; adjust for your region if needed)
 DEFAULT_BEDROCK_MODEL = "us.anthropic.claude-sonnet-4-6"
+
+
+def load_claude_settings_env() -> None:
+    """Load env vars from ~/.claude/settings.json (same as the Node server does).
+
+    Only sets vars that aren't already in the environment, so explicit
+    exports still take precedence.
+    """
+    settings_path = Path.home() / ".claude" / "settings.json"
+    try:
+        settings = json.loads(settings_path.read_text())
+        env_vars = settings.get("env", {})
+        loaded = []
+        for key, value in env_vars.items():
+            if key not in os.environ:
+                os.environ[key] = str(value)
+                loaded.append(key)
+        if loaded:
+            print(f"[Config] Loaded {len(loaded)} env vars from {settings_path}")
+    except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        pass
 
 
 def parse_args() -> argparse.Namespace:
@@ -100,10 +122,14 @@ Environment Variables (AWS Bedrock, when using --bedrock):
 
 def main() -> None:
     """Main entry point."""
+    load_claude_settings_env()
+
     args = parse_args()
 
-    if args.bedrock:
-        # Bedrock: require AWS region (we default in client) and at least one auth method
+    # Auto-detect --bedrock from ~/.claude/settings.json if not explicitly passed
+    use_bedrock = args.bedrock or os.environ.get("CLAUDE_CODE_USE_BEDROCK") == "1"
+
+    if use_bedrock:
         has_creds = (
             os.environ.get("AWS_ACCESS_KEY_ID")
             or os.environ.get("AWS_PROFILE")
@@ -119,7 +145,6 @@ def main() -> None:
             return
         model = args.model if args.model != DEFAULT_MODEL else DEFAULT_BEDROCK_MODEL
     else:
-        # Anthropic API: require API key
         if not os.environ.get("ANTHROPIC_API_KEY"):
             print("Error: ANTHROPIC_API_KEY environment variable not set")
             print("\nGet your API key from: https://console.anthropic.com/")
@@ -147,7 +172,7 @@ def main() -> None:
                 project_dir=project_dir,
                 model=model,
                 max_iterations=args.max_iterations,
-                use_bedrock=args.bedrock,
+                use_bedrock=use_bedrock,
                 aws_region=args.aws_region,
             )
         )
