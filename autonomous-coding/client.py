@@ -147,7 +147,7 @@ def create_client(
                     HookMatcher(matcher="Bash", hooks=[bash_security_hook]),
                 ],
             },
-            max_turns=1000,
+            max_turns=100,
             cwd=str(project_dir.resolve()),
             settings=str(settings_file.resolve()),  # Use absolute path
             env=claude_env,
