@@ -14,13 +14,34 @@ import {
   listConversations,
   createConversation,
   getConversation,
+  fetchTTSAudio,
 } from './services/api.js';
 import { v4 as uuidv4 } from './utils/uuid.js';
 
 // ── CompanionApp: the main UI, inside PipelineProvider context ────────────────
 
+// Model tier badge colors
+const MODEL_BADGE = {
+  'claude-haiku-4-5': { color: 'bg-blue-500', label: 'Haiku', tier: 'fast' },
+  'claude-sonnet-4-5': { color: 'bg-green-500', label: 'Sonnet', tier: 'balanced' },
+  'claude-opus-4-5': { color: 'bg-amber-500', label: 'Opus', tier: 'powerful' },
+};
+
+function ModelBadge({ modelId }) {
+  const badge = MODEL_BADGE[modelId] || MODEL_BADGE['claude-sonnet-4-5'];
+  return (
+    <div
+      className="absolute top-2 right-2 flex items-center gap-1.5 bg-black/40 backdrop-blur-sm rounded-full px-2 py-1 z-10"
+      title={`Active model: ${badge.label}`}
+    >
+      <div className={`w-2 h-2 rounded-full ${badge.color}`} />
+      <span className="text-white text-xs font-medium leading-none">{badge.label}</span>
+    </div>
+  );
+}
+
 function CompanionApp({ sharedAudioRef }) {
-  const { volume, showTranscript } = useApp();
+  const { volume, showTranscript, activeModel, showModelIndicator } = useApp();
   const { avatarState, error, sendMessage, interrupt, clearError, retryLastMessage, registerAudioPlayer, onAudioComplete, setMicEnabled } = usePipeline();
 
   // UI state
@@ -252,6 +273,7 @@ function CompanionApp({ sharedAudioRef }) {
               style={{ width: '100%', maxWidth: '340px', aspectRatio: '3/4' }}
             >
               <AvatarCanvas avatarState={avatarState} mouthOpenness={mouthOpenness} />
+              {showModelIndicator && <ModelBadge modelId={activeModel} />}
             </div>
             <StateIndicator state={avatarState} />
           </div>
@@ -387,8 +409,15 @@ function PipelineWrapper({ sharedAudioRef }) {
   const handleMessage = useCallback((event) => {
     switch (event.type) {
       case 'sentence_ready':
-        // Use browser TTS via the shared audio player
-        if (sharedAudioRef.current) {
+        if (!sharedAudioRef.current) break;
+        if (event.ttsMode === 'elevenlabs') {
+          fetchTTSAudio(event.text)
+            .then((arrayBuffer) => sharedAudioRef.current?.playAudioBuffer(arrayBuffer))
+            .catch((err) => {
+              console.warn('[TTS] ElevenLabs failed, falling back to browser TTS:', err.message);
+              sharedAudioRef.current?.speakBrowser(event.text);
+            });
+        } else {
           sharedAudioRef.current.speakBrowser(event.text);
         }
         break;

@@ -66,6 +66,14 @@ export async function listPersonas() {
   return res.json();
 }
 
+// ── Models ─────────────────────────────────────────────────────────────────
+
+export async function listModels() {
+  const res = await fetch(`${API_BASE}/models`);
+  if (!res.ok) throw new Error('Failed to fetch models');
+  return res.json();
+}
+
 // ── Health ─────────────────────────────────────────────────────────────────
 
 export async function checkHealth() {
@@ -134,6 +142,25 @@ export function streamMessage({ text, conversationId, generationId, onEvent, onE
   return {
     abort: () => controller.abort(),
   };
+}
+
+// ── TTS ────────────────────────────────────────────────────────────────────
+
+/**
+ * Fetch TTS audio from ElevenLabs via the server proxy.
+ * Returns an ArrayBuffer of MP3 audio data.
+ */
+export async function fetchTTSAudio(text, voiceId) {
+  const res = await fetch(`${API_BASE}/chat/tts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, voice_id: voiceId }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'TTS failed' }));
+    throw new Error(err.error || 'TTS request failed');
+  }
+  return res.arrayBuffer();
 }
 
 // ── Interrupt ──────────────────────────────────────────────────────────────
