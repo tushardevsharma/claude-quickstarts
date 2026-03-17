@@ -1,7 +1,7 @@
 # Director Context — Autonomous Coding Agent Session
 
 ## Current Status (as of handoff)
-- **Progress: 93/100 features passing (93%)**
+- **Progress: 97/100 features passing (97%)**
 - Agent process PID 53573 is still running (autonomous_agent_demo.py)
 - Branch: `tushardevsharma/ai-digital-avatar`
 - Project dir: `generations/my_project`
@@ -26,15 +26,11 @@ Session started at 46/100. Major commits:
 - `5f92d46` — Interruption details, state indicators, context window, model edge cases
 - Latest unnamed commit(s) bringing to 79/100
 
-### Features Still Failing (7 remaining)
+### Features Still Failing (3 remaining)
 ```
 [ 19] Voice Input: Voice Activity Detection
 [ 20] Voice Input: Speech-to-Text Transcription
-[ 21] Voice Input: Microphone Toggle Off
 [ 22] Interruption: Barge-In Interrupt
-[ 54] Multi-Model Switching: Per-Model Thinking Timeout
-[ 98] Transcript Panel: Live Captions Synchronized with Audio During Speaking
-[ 99] Latency: Pre-Warm TTS WebSocket Connection
 ```
 
 ## Environment
@@ -59,7 +55,7 @@ autonomous-coding/
 │   ├── initializer_prompt.md  # First-run setup prompt
 │   └── spec_sync_prompt.md    # Spec change sync prompt
 └── generations/my_project/    # Generated app (cwd for agent)
-    ├── feature_list.json      # Source of truth — 93/100 passing
+    ├── feature_list.json      # Source of truth — 97/100 passing
     ├── claude-progress.txt    # Agent's own session notes
     └── .progress_snapshot.json # Snapshot for new-wins diffing
 ```
