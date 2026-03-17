@@ -21,6 +21,9 @@ ALLOWED_COMMANDS = {
     "wc",
     "grep",
     "shasum",
+    "echo",
+    # Network (localhost API calls only; validated separately)
+    "curl",
     # File operations (agent uses SDK tools for most file ops, but cp/mkdir needed occasionally)
     "cp",
     "mkdir",
@@ -42,7 +45,7 @@ ALLOWED_COMMANDS = {
 }
 
 # Commands that need additional validation even when in the allowlist
-COMMANDS_NEEDING_EXTRA_VALIDATION = {"pkill", "chmod", "init.sh"}
+COMMANDS_NEEDING_EXTRA_VALIDATION = {"pkill", "chmod", "init.sh", "curl"}
 
 
 def split_command_segments(command_string: str) -> list[str]:
@@ -177,15 +180,20 @@ def validate_pkill_command(command_string: str) -> tuple[bool, str]:
         "next",
     }
 
+    import re
+
+    # Strip shell redirections (e.g. 2>/dev/null, >/dev/null) before parsing
+    clean = re.sub(r"\d*>[&>]?\S*", "", command_string).strip()
+
     try:
-        tokens = shlex.split(command_string)
+        tokens = shlex.split(clean)
     except ValueError:
         return False, "Could not parse pkill command"
 
     if not tokens:
         return False, "Empty pkill command"
 
-    # Separate flags from arguments
+    # Separate flags from non-flag arguments
     args = []
     for token in tokens[1:]:
         if not token.startswith("-"):
@@ -277,6 +285,66 @@ def validate_init_script(command_string: str) -> tuple[bool, str]:
     return False, f"Only ./init.sh is allowed, got: {script}"
 
 
+def validate_curl_command(command_string: str) -> tuple[bool, str]:
+    """
+    Validate curl commands - only allow requests to localhost/127.0.0.1.
+
+    This lets the agent hit local API endpoints without opening up arbitrary
+    external network access.
+
+    Returns:
+        Tuple of (is_allowed, reason_if_blocked)
+    """
+    import re
+
+    try:
+        tokens = shlex.split(command_string)
+    except ValueError:
+        return False, "Could not parse curl command"
+
+    if not tokens:
+        return False, "Empty curl command"
+
+    # Collect non-flag arguments — URLs are positional args not starting with -
+    # We also need to skip values that follow flags taking an argument (e.g. -H, -d, -X, -o)
+    flags_with_values = {
+        "-H", "--header",
+        "-d", "--data", "--data-raw", "--data-binary", "--data-urlencode",
+        "-X", "--request",
+        "-o", "--output",
+        "-u", "--user",
+        "--cacert", "--cert", "--key",
+        "--connect-timeout", "--max-time",
+        "-A", "--user-agent",
+        "--proxy",
+    }
+
+    urls = []
+    skip_next = False
+    for token in tokens[1:]:
+        if skip_next:
+            skip_next = False
+            continue
+        if token in flags_with_values:
+            skip_next = True
+            continue
+        if token.startswith("-"):
+            continue
+        urls.append(token)
+
+    if not urls:
+        return False, "curl command has no URL"
+
+    localhost_pattern = re.compile(
+        r"^https?://(localhost|127\.0\.0\.1)(:\d+)?(/.*)?$"
+    )
+    for url in urls:
+        if not localhost_pattern.match(url):
+            return False, f"curl only allowed for localhost URLs, got: {url}"
+
+    return True, ""
+
+
 def get_command_for_validation(cmd: str, segments: list[str]) -> str:
     """
     Find the specific command segment that contains the given command.
@@ -354,6 +422,10 @@ async def bash_security_hook(input_data, tool_use_id=None, context=None):
                     return {"decision": "block", "reason": reason}
             elif cmd == "init.sh":
                 allowed, reason = validate_init_script(cmd_segment)
+                if not allowed:
+                    return {"decision": "block", "reason": reason}
+            elif cmd == "curl":
+                allowed, reason = validate_curl_command(cmd_segment)
                 if not allowed:
                     return {"decision": "block", "reason": reason}
 

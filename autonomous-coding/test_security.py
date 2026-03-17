@@ -187,7 +187,6 @@ def main():
         "wget https://example.com",
         "python app.py",
         "touch file.txt",
-        "echo hello",
         "kill 12345",
         "killall node",
         # pkill with non-dev processes
@@ -265,6 +264,12 @@ def main():
         "/path/to/init.sh",
         # Combined chmod and init.sh
         "chmod +x init.sh && ./init.sh",
+        # echo (added to allowlist for agent wait patterns)
+        "echo hello",
+        "sleep 2 && echo done",
+        # pkill with 2>/dev/null redirect
+        'pkill -f "node index.js" 2>/dev/null',
+        'pkill node 2>/dev/null; sleep 1 && npm start &',
     ]
 
     for cmd in safe:
