@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../db/database.js';
-import { streamClaudeResponse, buildMessages, generateTitle } from '../services/claude.js';
+import { streamClaudeResponse, buildMessages, generateTitle, generateSummary } from '../services/claude.js';
 import { SentenceSplitter } from '../services/sentence-splitter.js';
 import { isElevenLabsConfigured, synthesizeElevenLabs } from '../services/tts.js';
 import { MODEL_REGISTRY } from './models.js';
@@ -37,9 +37,47 @@ function getActiveModelId(db) {
   return 'claude-sonnet-4-5';
 }
 
+// Save partial/complete assistant message safely (upsert pattern)
+function upsertAssistantMessage(db, { id, conversationId, content, modelId, wasInterrupted }) {
+  if (!content) return; // Don't save empty messages
+  const existing = db.prepare('SELECT id FROM messages WHERE id = ?').get(id);
+  if (existing) {
+    db.prepare(
+      `UPDATE messages SET content = ?, model_id = ?, was_interrupted = ? WHERE id = ?`
+    ).run(content, modelId || null, wasInterrupted ? 1 : 0, id);
+  } else {
+    db.prepare(
+      `INSERT INTO messages (id, conversation_id, role, content, model_id, was_interrupted) VALUES (?, ?, 'assistant', ?, ?, ?)`
+    ).run(id, conversationId, content, modelId || null, wasInterrupted ? 1 : 0);
+  }
+}
+
+// Trigger summary generation if conversation has grown past a threshold
+function maybeTriggerSummary(db, convId) {
+  const msgCount = db.prepare(
+    `SELECT COUNT(*) as count FROM messages WHERE conversation_id = ?`
+  ).get(convId);
+
+  const count = msgCount?.count || 0;
+
+  // Generate summary every 40 messages (and at 40, 80, 120...)
+  if (count >= 40 && count % 40 === 0) {
+    const allMsgs = db.prepare(
+      `SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY created_at ASC`
+    ).all(convId);
+
+    generateSummary(allMsgs).then((summary) => {
+      if (summary) {
+        db.prepare(`UPDATE conversations SET summary = ? WHERE id = ?`).run(summary, convId);
+        console.log(`[Chat] Generated summary for conversation ${convId}`);
+      }
+    }).catch((err) => console.warn('[Chat] Summary failed:', err.message));
+  }
+}
+
 const router = Router();
 
-// Active generation map: generationId -> { abortController }
+// Active generation map: generationId -> { abortController, convId, partialRef }
 const activeGenerations = new Map();
 
 // POST /api/chat/stream - stream a message to Claude with SSE
@@ -119,11 +157,14 @@ router.post('/stream', async (req, res) => {
 
   const genId = generation_id || uuidv4();
   const abortController = new AbortController();
-  activeGenerations.set(genId, { abortController, convId });
+  const assistantMsgId = uuidv4();
+
+  // partialRef: shared reference so the interrupt endpoint can save partial content
+  const partialRef = { text: '', msgId: assistantMsgId };
+  activeGenerations.set(genId, { abortController, convId, partialRef });
 
   const splitter = new SentenceSplitter();
   let fullResponse = '';
-  const assistantMsgId = uuidv4();
 
   // Send initial state
   res.write(`data: ${JSON.stringify({ type: 'state', state: 'thinking', conversation_id: convId, generation_id: genId })}\n\n`);
@@ -138,6 +179,7 @@ router.post('/stream', async (req, res) => {
       signal: abortController.signal,
       onToken: (token) => {
         fullResponse += token;
+        partialRef.text = fullResponse; // keep partialRef in sync for interrupt handler
 
         // Send text token to client
         res.write(`data: ${JSON.stringify({ type: 'text_token', token, generation_id: genId })}\n\n`);
@@ -148,17 +190,25 @@ router.post('/stream', async (req, res) => {
           res.write(`data: ${JSON.stringify({ type: 'sentence', text: sentence, generation_id: genId, tts_mode: elevenLabsEnabled ? 'elevenlabs' : 'browser' })}\n\n`);
         }
       },
-      onComplete: async (fullText) => {
-        // Flush remaining buffer
-        const remaining = splitter.flush();
-        if (remaining) {
-          res.write(`data: ${JSON.stringify({ type: 'sentence', text: remaining, generation_id: genId, tts_mode: elevenLabsEnabled ? 'elevenlabs' : 'browser', is_final: true })}\n\n`);
+      onComplete: async (fullText, wasAborted) => {
+        // Flush remaining buffer (only if not aborted)
+        if (!wasAborted) {
+          const remaining = splitter.flush();
+          if (remaining) {
+            res.write(`data: ${JSON.stringify({ type: 'sentence', text: remaining, generation_id: genId, tts_mode: elevenLabsEnabled ? 'elevenlabs' : 'browser', is_final: true })}\n\n`);
+          }
         }
 
-        // Save assistant message with model_id
-        db.prepare(
-          `INSERT INTO messages (id, conversation_id, role, content, model_id) VALUES (?, ?, ?, ?, ?)`
-        ).run(assistantMsgId, convId, 'assistant', fullText, activeModelId);
+        // Save assistant message (upsert handles race with interrupt endpoint)
+        if (fullText) {
+          upsertAssistantMessage(db, {
+            id: assistantMsgId,
+            conversationId: convId,
+            content: fullText,
+            modelId: activeModelId,
+            wasInterrupted: wasAborted,
+          });
+        }
 
         // Auto-generate title after first exchange
         const msgCount = db.prepare(
@@ -166,22 +216,27 @@ router.post('/stream', async (req, res) => {
         ).get(convId);
 
         if (msgCount.count === 2 && conversation.title === 'New Conversation') {
-          // Generate title in background
-          generateTitle(text, fullText).then((title) => {
-            db.prepare(
-              `UPDATE conversations SET title = ? WHERE id = ?`
-            ).run(title, convId);
+          generateTitle(text, fullText || '').then((title) => {
+            db.prepare(`UPDATE conversations SET title = ? WHERE id = ?`).run(title, convId);
           });
         }
 
-        res.write(`data: ${JSON.stringify({ type: 'complete', conversation_id: convId, generation_id: genId, model_id: activeModelId })}\n\n`);
-        res.end();
+        // Periodically generate conversation summary using Haiku (#87)
+        maybeTriggerSummary(db, convId);
+
         activeGenerations.delete(genId);
+
+        if (!res.writableEnded) {
+          res.write(`data: ${JSON.stringify({ type: 'complete', conversation_id: convId, generation_id: genId, model_id: activeModelId, was_interrupted: wasAborted })}\n\n`);
+          res.end();
+        }
       },
       onError: (err) => {
         console.error('[Chat] Claude error:', err.message);
-        res.write(`data: ${JSON.stringify({ type: 'error', message: err.message, generation_id: genId })}\n\n`);
-        res.end();
+        if (!res.writableEnded) {
+          res.write(`data: ${JSON.stringify({ type: 'error', message: err.message, generation_id: genId })}\n\n`);
+          res.end();
+        }
         activeGenerations.delete(genId);
       },
     });
@@ -201,22 +256,21 @@ router.post('/interrupt', (req, res) => {
 
   if (generation_id && activeGenerations.has(generation_id)) {
     const gen = activeGenerations.get(generation_id);
+
+    // Save partial text immediately (before abort, to avoid race)
+    if (gen.partialRef?.text && conversation_id) {
+      const db = getDatabase();
+      upsertAssistantMessage(db, {
+        id: gen.partialRef.msgId,
+        conversationId: gen.convId || conversation_id,
+        content: gen.partialRef.text,
+        modelId: null,
+        wasInterrupted: true,
+      });
+    }
+
     gen.abortController.abort();
     activeGenerations.delete(generation_id);
-
-    // Mark last message as interrupted if conversation_id provided
-    if (conversation_id) {
-      const db = getDatabase();
-      const lastMsg = db.prepare(
-        `SELECT id FROM messages WHERE conversation_id = ? AND role = 'assistant' ORDER BY created_at DESC LIMIT 1`
-      ).get(conversation_id);
-
-      if (lastMsg) {
-        db.prepare(
-          `UPDATE messages SET was_interrupted = 1 WHERE id = ?`
-        ).run(lastMsg.id);
-      }
-    }
 
     res.json({ success: true, message: 'Generation interrupted' });
   } else {

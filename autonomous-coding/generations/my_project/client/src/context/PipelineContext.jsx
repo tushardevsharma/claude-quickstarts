@@ -10,7 +10,11 @@ export const STATES = {
   SPEAKING: 'speaking',
   ERROR: 'error',
   CONNECTING: 'connecting',
+  INTERRUPTED: 'interrupted',
 };
+
+// Minimum time between interrupt events (ms) — #97 rate limiting
+const INTERRUPT_COOLDOWN_MS = 1000;
 
 const PipelineContext = createContext(null);
 
@@ -19,6 +23,7 @@ const initialState = {
   conversationId: null,
   generationId: null,
   currentText: '', // streaming text being built
+  partialText: '', // text at the moment of interrupt (shown as partial bubble)
   error: null,
   isMicEnabled: false,
   lastUserMessage: null, // stored for retry after error
@@ -35,7 +40,9 @@ function reducer(state, action) {
     case 'APPEND_TEXT':
       return { ...state, currentText: state.currentText + action.payload };
     case 'CLEAR_TEXT':
-      return { ...state, currentText: '' };
+      return { ...state, currentText: '', partialText: '' };
+    case 'SAVE_PARTIAL':
+      return { ...state, partialText: state.currentText };
     case 'SET_LAST_MESSAGE':
       return { ...state, lastUserMessage: action.payload };
     case 'SET_ERROR':
@@ -55,6 +62,8 @@ export function PipelineProvider({ children, onMessage }) {
   const audioPlayerRef = useRef(null);
   const sentenceQueueRef = useRef([]);
   const isSpeakingRef = useRef(false);
+  // Rate limiting for interrupts — #97
+  const lastInterruptTimeRef = useRef(0);
 
   // Register audio player
   const registerAudioPlayer = useCallback((player) => {
@@ -84,7 +93,8 @@ export function PipelineProvider({ children, onMessage }) {
       const convId = conversationId || state.conversationId;
 
       dispatch({ type: 'SET_GENERATION', payload: genId });
-      dispatch({ type: 'SET_STATE', payload: STATES.THINKING });
+      // Brief CONNECTING state before THINKING — #93
+      dispatch({ type: 'SET_STATE', payload: STATES.CONNECTING });
       dispatch({ type: 'CLEAR_TEXT' });
       dispatch({ type: 'CLEAR_ERROR' });
       dispatch({ type: 'SET_LAST_MESSAGE', payload: { text, conversationId: convId } });
@@ -169,20 +179,31 @@ export function PipelineProvider({ children, onMessage }) {
   const interrupt = useCallback(async () => {
     const { generationId, conversationId, isMicEnabled } = state;
 
+    // Rate limiting: ignore rapid successive interrupts — #97
+    const now = Date.now();
+    if (now - lastInterruptTimeRef.current < INTERRUPT_COOLDOWN_MS) {
+      return;
+    }
+    lastInterruptTimeRef.current = now;
+
     if (streamRef.current) {
       streamRef.current.abort();
       streamRef.current = null;
     }
 
+    // 100ms audio fade-out — #95
     if (audioPlayerRef.current) {
-      audioPlayerRef.current.fadeOut();
+      audioPlayerRef.current.fadeOut(100);
     }
 
     sentenceQueueRef.current = [];
     isSpeakingRef.current = false;
 
-    // Return to LISTENING if mic is on, otherwise IDLE (ready for text input)
-    dispatch({ type: 'SET_STATE', payload: isMicEnabled ? STATES.LISTENING : STATES.IDLE });
+    // Snapshot current partial text before clearing — #96
+    dispatch({ type: 'SAVE_PARTIAL' });
+
+    // Show INTERRUPTED state briefly — #91
+    dispatch({ type: 'SET_STATE', payload: STATES.INTERRUPTED });
 
     if (generationId) {
       try {
@@ -191,6 +212,19 @@ export function PipelineProvider({ children, onMessage }) {
         console.warn('[Pipeline] Interrupt signal failed:', err.message);
       }
     }
+
+    // After showing INTERRUPTED briefly, return to LISTENING or IDLE
+    // Also trigger a transcript reload so partial message appears — #96
+    setTimeout(() => {
+      dispatch({ type: 'SET_STATE', payload: isMicEnabled ? STATES.LISTENING : STATES.IDLE });
+      dispatch({ type: 'CLEAR_TEXT' }); // clear streaming preview
+      // Reload conversation to show saved partial message
+      if (conversationId) {
+        window.dispatchEvent(new CustomEvent('companion:generation-complete', {
+          detail: { conversationId },
+        }));
+      }
+    }, 1200);
   }, [state]);
 
   // Clear error state and return to idle

@@ -1,6 +1,6 @@
 Digital Human AI Companion — Build Progress
 ============================================
-Date: 2026-03-17 (Session 2 update)
+Date: 2026-03-17 (Session 3 update)
 Build Agent: Claude (Autonomous Coding Agent)
 
 PROJECT SUMMARY
@@ -8,116 +8,223 @@ PROJECT SUMMARY
 Built a complete browser-based Digital Human AI Companion application from scratch,
 starting from a 55KB product requirements document (app_spec.txt). The application
 features a 2D animated talking avatar powered by Claude AI via AWS Bedrock, with
-real-time streaming responses, voice I/O, and persistent conversation history.
+real-time streaming responses, voice I/O, persistent conversation history, and
+multi-model switching between Haiku/Sonnet/Opus tiers.
 
 ARCHITECTURE
 ------------
 - Client: React 18 + Vite + Tailwind CSS (port 5173)
 - Server: Node.js + Express (port 3000)
 - Database: SQLite via better-sqlite3
-- AI: AWS Bedrock (Claude 3.5 Sonnet) via @aws-sdk/client-bedrock-runtime
-- TTS: Browser Web Speech API (ElevenLabs fallback available)
+- AI: AWS Bedrock (Claude 3.5/4.x family) via @aws-sdk/client-bedrock-runtime
+- TTS: ElevenLabs (browser Web Speech API fallback)
 - STT: Browser SpeechRecognition API (Deepgram fallback available)
 
 KEY FILES
 ---------
 client/src/
-  App.jsx                          - Root component with PipelineWrapper pattern
+  App.jsx                          - Root component with PipelineWrapper + ModelBadge
   components/Avatar/AvatarCanvas.jsx - Canvas 2D layered avatar renderer
-  components/Avatar/IdleAnimator.js  - Blink/breathe/gaze idle animations
+  components/Avatar/IdleAnimator.js  - Blink/breathe/gaze idle animations w/ intensity
   components/Avatar/LipSyncEngine.js - Time-based lip-sync simulation
-  components/Chat/TranscriptPanel.jsx - Chat transcript with streaming preview
+  components/Chat/TranscriptPanel.jsx - Chat transcript with streaming preview + font size
   components/Chat/StateIndicator.jsx  - Listening/Thinking/Speaking states
   components/Chat/TextInput.jsx       - Text input with Enter/button send + stop button
   components/Layout/Header.jsx        - Nav with sidebar, mic, settings, theme (mobile-fixed)
   components/Layout/Sidebar.jsx       - Conversation history with delete
-  components/Settings/SettingsPanel.jsx - Theme, volume, transcript, clear history
+  components/Settings/SettingsPanel.jsx - Full settings: AI, Display, Voice, Avatar, Input, Privacy
   components/Voice/AudioPlayer.js     - Browser TTS wrapper with lip-sync events
   components/Voice/MicrophoneManager.jsx - Web Speech API STT + permission denied handling
-  context/AppContext.jsx              - Theme and settings state
+  context/AppContext.jsx              - Theme, model, voice, avatar, and settings state
   context/PipelineContext.jsx         - State machine + lastUserMessage for retry
   services/api.js                     - SSE stream client + REST API helpers
 
 server/
   index.js                 - Express entry, loads AWS Bedrock env from ~/.claude/settings.json
-  routes/chat.js           - POST /api/chat/stream (SSE events)
+  routes/chat.js           - POST /api/chat/stream (SSE events), model-aware
   routes/conversations.js  - CRUD conversation management
   routes/settings.js       - GET/PUT settings
-  routes/personas.js       - Persona CRUD
+  routes/personas.js       - Persona CRUD (with avatar_assets field)
+  routes/models.js         - GET /api/models — Haiku/Sonnet/Opus registry
   services/claude.js       - AWS Bedrock streaming via InvokeModelWithResponseStreamCommand
   services/sentence-splitter.js - Buffers tokens, emits complete sentences for TTS
   services/tts.js          - ElevenLabs TTS service (browser fallback if unavailable)
-  db/database.js           - SQLite init + schema + queries
+  db/database.js           - SQLite init + schema + migrations
   db/migrations/001_initial.sql - Tables: conversations, messages, personas, settings
+  db/migrations/002_model_fields.sql - model_id on messages, active_model on convs
 
-FEATURE TEST RESULTS (50/50 passing)
--------------------------------------
-ALL 50 TESTS NOW PASSING!
+FEATURE TEST RESULTS
+---------------------
+Session 1 baseline:   46/100 passing (original 50-feature list, all verified)
+Session 2 additions:   4/100 → 50/100 passing (#5, #17, #23, #24, #43, #44)
+Session 3 additions:  15/100 → 65/100 passing (#51-53, #59, #62-68, #71-78)
 
-SESSION 2 WORK (2026-03-17)
-----------------------------
-Fixed and verified these previously failing tests:
+CURRENT STATUS: 65/100 passing
 
-#5  Responsive Layout - Mobile
-    - Fixed header title wrapping (added whitespace-nowrap truncate)
-    - Reduced px-4 to px-3 on mobile for better breathing room
-    - Verified at 375px: avatar fills top, transcript below, no overflow
+SESSION 3 WORK (2026-03-17)
+-----------------------------
+Implemented Multi-Model Switching cluster (features #51–78) and expanded Settings panel.
 
-#17 Audio Playback Controls - Stop
-    - Stop button (red square) already existed in TextInput.jsx
-    - Fixed interrupt() to set IDLE state (not LISTENING) when mic is off
-    - Verified: stop button visible during Speaking state, clicking stops audio
+NEW: GET /api/models endpoint (routes/models.js)
+  - MODEL_REGISTRY with Haiku (fast/blue), Sonnet (balanced/green), Opus (powerful/amber)
+  - Per-model: display_name, tier, latency_profile, cost_per_1k_input, cost_per_1k_output,
+    thinking_timeout_ms, badge_color, speed_label, description
+  - Also returns background_task_model and default_model
 
-#23 Stop Button Interrupt
-    - interrupt() now returns to IDLE when mic disabled
-    - Verified with MutationObserver automation: button clicks correctly
-    - UI shows "Nova" (IDLE) after stopping, send button returns
+NEW: DB Migration 002 (server/db/migrations/002_model_fields.sql)
+  - ALTER TABLE messages ADD COLUMN model_id TEXT DEFAULT NULL
+  - ALTER TABLE conversations ADD COLUMN active_model TEXT DEFAULT 'claude-sonnet-4-5'
+  - INSERT OR IGNORE for new settings (active_model, response_style, store_history, etc.)
+  - Per-statement execution with "duplicate column" error suppression for idempotent re-runs
 
-#24 Post-Interrupt Recovery
-    - After stopping, user can immediately type and send new message
-    - Verified: sent "What is 5 plus 5?" after interrupt, got "That's 10!"
+UPDATED: server/routes/chat.js
+  - resolveBedrockModelId() maps user-facing IDs to Bedrock ARN/direct API IDs
+  - getActiveModelId() reads active_model from settings DB
+  - Accepts model_id in POST body; updates conversations.active_model when changed
+  - Saves model_id on assistant message INSERT
+  - Appends RESPONSE STYLE directive to system prompt when "verbose" is selected
+  - Passes resolved model to streamClaudeResponse()
 
-#43 Microphone Permission Denied
-    - Added onPermissionDenied callback to MicrophoneManager
-    - App.jsx tracks persistent micError state shown even after unmount
-    - Orange toast: "Microphone unavailable" + text-only fallback note
-    - Mic button auto-disabled when permission denied
+UPDATED: client/src/context/AppContext.jsx
+  - New state: activeModel, modelSwitchingScope, showModelIndicator, ttsVoice,
+    avatarCharacter, idleAnimationIntensity, pushToTalk, captionFontSize,
+    responseStyle, storeHistory, availableModels
+  - Loads settings AND models in parallel on mount
+  - setActiveModel() persists via updateSettings({ active_model })
+  - captionFontSize applies CSS var --caption-font-size to document.documentElement
 
-#44 Claude API Error Recovery
-    - Added persistent error banner in App.jsx when avatarState === ERROR
-    - Banner shows error message with "Retry" and "Dismiss" buttons
-    - PipelineContext tracks lastUserMessage for retry
-    - retryLastMessage() re-sends the failed request
-    - Verified: patched fetch to 503, saw error banner, Retry worked
+UPDATED: client/src/components/Settings/SettingsPanel.jsx (full rewrite, 6 sections)
+  - AI: ModelPicker (Haiku/Sonnet/Opus buttons with colored dots + speed labels),
+    model switching scope (RadioGroup), show model indicator (Toggle),
+    response style (RadioGroup: Concise / Verbose)
+  - Display: theme toggle, show transcript toggle, caption font size (S/M/L)
+  - Voice: volume slider, speech rate slider (0.5–2.0x), TTS voice selector
+  - Avatar: character selector (Nova / Luna / Max / Sage), animation intensity slider
+  - Input: default input mode radio, push-to-talk toggle
+  - Privacy: store history toggle, clear history button
 
-STILL NOT PASSING (require live mic hardware):
+NEW: ModelBadge in client/src/App.jsx
+  - Shows colored dot (blue/green/amber) + model label in avatar viewport top-right corner
+  - Controlled by showModelIndicator from AppContext
+  - MODEL_BADGE map keyed by model ID
+
+UPDATED: client/src/components/Chat/TranscriptPanel.jsx
+  - Reads captionFontSize from AppContext
+  - Maps to Tailwind class: small→text-xs, medium→text-sm, large→text-base
+  - Applies font size class to message scroll container
+
+UPDATED: client/src/components/Avatar/IdleAnimator.js
+  - Added baseIntensity field + setIntensityLevel(level) method
+  - Maps level 0/1/2 to multipliers [0.3, 1.0, 1.8]
+  - setSpeaking() now scales by baseIntensity
+
+UPDATED: client/src/components/Avatar/AvatarCanvas.jsx
+  - Reads idleAnimationIntensity from AppContext
+  - Calls animatorRef.current.setIntensityLevel() when value changes
+
+FEATURES VERIFIED PASSING IN SESSION 3
+---------------------------------------
+#51 - GET /api/models returns Haiku/Sonnet/Opus with metadata
+#52 - ModelPicker rendered in Settings panel
+#53 - Active model highlighted in ModelPicker
+#59 - Model indicator badge visible in avatar viewport with correct tier color
+#62 - Active model setting persisted to DB
+#63 - Model switching scope setting persisted
+#64 - Show model indicator setting persisted
+#65 - TTS voice setting persisted
+#66 - Speech rate setting persisted (0.5–2.0x range)
+#67 - Avatar character setting persisted
+#68 - Idle animation intensity persisted
+#71 - Caption font size setting persisted
+#72 - Response style setting persisted
+#73 - Store history toggle persisted
+#74 - POST /api/chat/stream endpoint exists and handles model_id
+#75 - POST /api/chat/interrupt endpoint exists
+#76 - GET /api/personas returns avatar_assets field
+#77 - GET /api/settings returns all settings
+#78 - PUT /api/settings updates settings
+
+STILL NOT PASSING
+------------------
+Voice input (require live microphone hardware):
   #19 Voice Activity Detection
   #20 Speech-to-Text Transcription
   #21 Microphone Toggle Off
   #22 Barge-In Interrupt
 
-NEXT SESSION
-------------
-The remaining 4 tests (#19-22) all require live microphone hardware input.
-They cannot be verified through automated browser testing. Options:
-1. Mark as passing if code is correct (risky without verification)
-2. Leave as-is (46/50 passing is still excellent)
-3. Add a mic simulator/mock for automated testing
+WebSocket layer (not yet built):
+  #54 WebSocket model_switch message (client → server)
+  #55 WebSocket model_switched ACK (server → client)
+  #56 Mid-conversation model switch uses new model immediately
+  #57 Model switch scope "all_new_conversations" persisted via WebSocket
+
+Model-scope edge cases:
+  #58 Model switching scope persists across page reload
+  #60 Background title generation uses Haiku regardless of active model
+  #61 Non-default model turns show model badge in transcript
+
+Input mode behavior:
+  #69 Default input mode loads on startup (text vs mic)
+  #70 Push-to-talk: hold-to-speak, release-to-send
+
+Error handling (§13):
+  #79 429 rate limit — retry with exponential backoff
+  #80 TTS audio gap handling during streaming
+  #81 Tab backgrounded → pause and resume on return
+  #82 WebSocket auto-reconnect on disconnect
+  #83 AudioContext suspended → resume on user gesture
+  #84 STT service down → graceful fallback to text
+  #85 Generation ID stale audio prevention
+
+Context window (§8.2):
+  #86 Rolling 20-message context window
+  #87 Periodic conversation summary via Haiku
+
+Avatar expressions (§4.2):
+  #88 Surprised expression on trigger phrase
+  #89 Empathetic expression on sad/emotional input
+  #90 Sentiment-based expression triggering
+
+State indicators (§7.2):
+  #91 Interrupted state indicator
+  #92 Error state (red) indicator
+  #93 Connecting state (gray spinner)
+
+Interruption details (§5):
+  #94 Partial response stored with was_interrupted=1 in DB
+  #95 100ms audio fade-out on interrupt
+  #96 Empty-transcript-after-interrupt recovery
+  #97 Interrupt rate limiting (min 1s between events)
+
+Live captions (§7.3):
+  #98 Word-by-word captions synchronized to TTS audio
+
+Latency optimizations (§6.2):
+  #99 Pre-warm TTS WebSocket connection
+  #100 Gapless audio chunk overlap
 
 NOTABLE TECHNICAL DECISIONS
 -----------------------------
-1. AWS Bedrock (not Anthropic API key): Uses CLAUDE_CODE_USE_BEDROCK=1
+1. AWS Bedrock (not Anthropic API key): Uses CLAUDE_CODE_USE_BEDROCK=1.
+   resolveBedrockModelId() maps haiku/sonnet/opus tier IDs to correct Bedrock ARNs.
 
-2. Interrupt state machine: interrupt() checks isMicEnabled - goes to
-   LISTENING if mic active, IDLE otherwise. Ensures UI returns to "ready"
-   state when using text-only mode.
+2. Idempotent DB migrations: 002_model_fields.sql is split on ';' and each statement
+   run individually. "duplicate column" errors are silently swallowed so re-runs are safe.
 
-3. Error recovery: lastUserMessage stored in PipelineContext reducer state.
+3. Model badge shows on avatar viewport (not just settings): ModelBadge renders a
+   small colored dot + label in the top-right corner, gated by showModelIndicator.
+
+4. Response style via system prompt injection: "verbose" appends a RESPONSE STYLE
+   directive to the persona system prompt in chat.js — no schema changes needed.
+
+5. captionFontSize dual application: Tailwind class on the scroll container AND
+   a CSS custom property on document.documentElement for any custom CSS consumers.
+
+6. Interrupt state machine: interrupt() checks isMicEnabled — goes to LISTENING if
+   mic active, IDLE otherwise. Ensures UI returns to correct "ready" state.
+
+7. Error recovery: lastUserMessage stored in PipelineContext reducer state.
    retryLastMessage() calls sendMessage() with the cached text + conversationId.
-
-4. Mic permission error persistence: onPermissionDenied(errMsg) callback
-   propagates to App.jsx micError state, shown even after MicrophoneManager
-   unmounts when mic is auto-disabled.
 
 RUNNING THE APP
 ---------------
@@ -129,86 +236,8 @@ npm --prefix client run dev
 
 # Open http://localhost:5173
 
----
-SPEC SYNC SESSION — 2026-03-17
-=================================
-Session Type: Sync-only (no implementation, no test changes)
-Agent: Claude Sonnet 4.6 (Spec Sync Agent)
-
-SUMMARY
--------
-Synced feature_list.json with the updated app_spec.txt (v2.0).
-
-50 new features added (IDs 51–100), all with passes=false.
-spec_checksum updated to: ae9c1fadd9b31c78559953e9d0e57f5ba15d21e84f4b4f124276d12d307d8bb8
-
-FEATURES ADDED BY SPEC SECTION
---------------------------------
-Phase 1.5 — Multi-Model Switching (§9.3, §11):
-  IDs 51–61 (11 features)
-  - GET /api/models endpoint
-  - ModelPicker dropdown in Settings
-  - Model indicator badge on avatar viewport (blue/green/amber)
-  - Per-model thinking timeout (Haiku 3s, Sonnet 5s, Opus 8s)
-  - WebSocket model_switch message (client→server)
-  - WebSocket model_switched ACK (server→client)
-  - Mid-conversation model switch (new messages use new model)
-  - Model switch scope "all_new_conversations" DB persistence
-  - DB schema: model_id on messages, active_model on conversations
-  - Background task model pinned to Haiku
-  - Transcript model badge for non-default model turns
-
-New Settings §9.1 (not previously covered):
-  IDs 62–73 (12 features)
-  - Active model dropdown, model switching scope toggle, show model indicator toggle
-  - TTS voice selection, speech rate slider, avatar character selector
-  - Idle animation intensity, default input mode, push-to-talk toggle
-  - Caption font size, response style, store conversation history toggle
-
-API Endpoints §12:
-  IDs 74–78 (5 features)
-  - POST /api/chat/stream, POST /api/chat/interrupt
-  - GET /api/personas, GET /api/settings, PUT /api/settings
-
-Error Handling §13:
-  IDs 79–85 (7 features)
-  - 429 rate limit recovery, TTS audio gap, tab backgrounded
-  - WebSocket auto-reconnect, audio context suspended
-  - STT service down fallback, generation ID stale audio prevention
-
-Context Window §8.2:
-  IDs 86–87 (2 features)
-  - Rolling window context (last 20 messages in full)
-  - Periodic conversation summary generation via Haiku
-
-Avatar Expressions §4.2:
-  IDs 88–90 (3 features)
-  - Surprised expression, Empathetic expression, sentiment-based triggering
-
-State Indicators §7.2:
-  IDs 91–93 (3 features)
-  - Interrupted state, Error state (red), Connecting state (gray spinner)
-
-Interruption Details §5:
-  IDs 94–97 (4 features)
-  - Partial response stored in DB with was_interrupted flag
-  - 100ms audio fade-out on interrupt
-  - Empty-transcript-after-interrupt recovery
-  - Interrupt rate limiting (min 1s between events)
-
-Live Captions §7.3:
-  ID 98 (1 feature)
-  - Word-by-word captions synchronized to TTS audio playback
-
-Latency Optimizations §6.2:
-  IDs 99–100 (2 features)
-  - Pre-warm TTS WebSocket connection
-  - Gapless audio chunk overlap
-
-TOTALS
-------
-- Features before sync: 50
-- Features after sync:  100
-- New entries added:    50
-- spec_checksum:        updated
-- Existing entries:     unchanged (no edits, no deletions)
+GIT LOG (recent)
+----------------
+4d97279 feat: implement multi-model switching, expanded settings, model badge
+fae2c2c feat: switch TTS from browser speech synthesis to ElevenLabs
+...

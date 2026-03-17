@@ -2,6 +2,27 @@ import { useEffect, useRef } from 'react';
 import { usePipeline, STATES } from '../../context/PipelineContext.jsx';
 import { useApp } from '../../context/AppContext.jsx';
 
+// Model badge colors for non-default turns — #61
+const MODEL_BADGE_MAP = {
+  'claude-haiku-4-5': { color: 'bg-blue-500', label: 'Haiku' },
+  'claude-sonnet-4-5': null, // default — don't show badge
+  'claude-opus-4-5': { color: 'bg-amber-500', label: 'Opus' },
+};
+
+const DEFAULT_MODEL_ID = 'claude-sonnet-4-5';
+
+function ModelTurnBadge({ modelId }) {
+  if (!modelId || modelId === DEFAULT_MODEL_ID) return null;
+  const badge = MODEL_BADGE_MAP[modelId];
+  if (!badge) return null;
+  return (
+    <div className={`inline-flex items-center gap-1 ${badge.color} rounded-full px-1.5 py-0.5 mt-1.5`}>
+      <span className="w-1.5 h-1.5 rounded-full bg-white/80" />
+      <span className="text-white text-[10px] font-medium leading-none">{badge.label}</span>
+    </div>
+  );
+}
+
 function MessageBubble({ message }) {
   const isUser = message.role === 'user';
 
@@ -12,17 +33,21 @@ function MessageBubble({ message }) {
           N
         </div>
       )}
-      <div
-        className={`max-w-[80%] px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed ${
-          isUser
-            ? 'bg-blue-600 text-white rounded-tr-sm'
-            : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-tl-sm'
-        }`}
-      >
-        {message.content}
-        {!!message.was_interrupted && (
-          <span className="text-xs opacity-60 ml-1">[interrupted]</span>
-        )}
+      <div className="flex flex-col">
+        <div
+          className={`max-w-[80%] px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed ${
+            isUser
+              ? 'bg-blue-600 text-white rounded-tr-sm'
+              : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-tl-sm'
+          }`}
+        >
+          {message.content}
+          {!!message.was_interrupted && (
+            <span className="text-xs opacity-60 ml-1">[interrupted]</span>
+          )}
+        </div>
+        {/* Model badge for non-default assistant turns — #61 */}
+        {!isUser && <ModelTurnBadge modelId={message.model_id} />}
       </div>
       {isUser && (
         <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex-shrink-0 ml-2 flex items-center justify-center text-white text-xs font-bold mt-1">
@@ -33,15 +58,27 @@ function MessageBubble({ message }) {
   );
 }
 
-function StreamingMessage({ text }) {
+function StreamingMessage({ text, isInterrupted }) {
   return (
     <div className="flex justify-start mb-3">
-      <div className="w-7 h-7 rounded-full bg-gradient-to-br from-violet-500 to-purple-700 flex-shrink-0 mr-2 flex items-center justify-center text-white text-xs font-bold mt-1">
+      <div className={`w-7 h-7 rounded-full flex-shrink-0 mr-2 flex items-center justify-center text-white text-xs font-bold mt-1 ${
+        isInterrupted
+          ? 'bg-gradient-to-br from-orange-400 to-orange-600'
+          : 'bg-gradient-to-br from-violet-500 to-purple-700'
+      }`}>
         N
       </div>
-      <div className="max-w-[80%] px-3.5 py-2.5 rounded-2xl rounded-tl-sm text-sm leading-relaxed bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100">
+      <div className={`max-w-[80%] px-3.5 py-2.5 rounded-2xl rounded-tl-sm text-sm leading-relaxed ${
+        isInterrupted
+          ? 'bg-orange-50 dark:bg-orange-950/30 text-gray-700 dark:text-gray-300 border border-orange-200 dark:border-orange-800/50'
+          : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+      }`}>
         {text}
-        <span className="inline-block w-0.5 h-3.5 bg-gray-500 dark:bg-gray-400 ml-0.5 align-middle animate-pulse" />
+        {isInterrupted ? (
+          <span className="text-xs opacity-50 ml-1">[interrupted]</span>
+        ) : (
+          <span className="inline-block w-0.5 h-3.5 bg-gray-500 dark:bg-gray-400 ml-0.5 align-middle animate-pulse" />
+        )}
       </div>
     </div>
   );
@@ -49,7 +86,7 @@ function StreamingMessage({ text }) {
 
 export default function TranscriptPanel({ messages, isCollapsed, onToggle }) {
   const scrollRef = useRef(null);
-  const { currentText, avatarState } = usePipeline();
+  const { currentText, partialText, avatarState } = usePipeline();
   const { captionFontSize } = useApp();
   const fontSizeClass = { small: 'text-xs', medium: 'text-sm', large: 'text-base' }[captionFontSize] || 'text-sm';
 
@@ -58,7 +95,7 @@ export default function TranscriptPanel({ messages, isCollapsed, onToggle }) {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, currentText]);
+  }, [messages, currentText, partialText]);
 
   if (isCollapsed) {
     return (
@@ -76,8 +113,11 @@ export default function TranscriptPanel({ messages, isCollapsed, onToggle }) {
     );
   }
 
-  const isStreaming =
-    (avatarState === STATES.THINKING || avatarState === STATES.SPEAKING) && currentText;
+  const isActivelyStreaming =
+    (avatarState === STATES.THINKING || avatarState === STATES.SPEAKING || avatarState === STATES.CONNECTING) && currentText;
+
+  // Show interrupted partial text with interrupted styling — #96
+  const isInterrupted = avatarState === STATES.INTERRUPTED && partialText;
 
   return (
     <div className="flex flex-col bg-white/50 dark:bg-gray-900/50 backdrop-blur rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
@@ -103,7 +143,7 @@ export default function TranscriptPanel({ messages, isCollapsed, onToggle }) {
         className={`overflow-y-auto p-3 space-y-1 max-h-48 ${fontSizeClass}`}
         style={{ scrollBehavior: 'smooth' }}
       >
-        {messages.length === 0 && !isStreaming ? (
+        {messages.length === 0 && !isActivelyStreaming && !isInterrupted ? (
           <div className="text-center py-6 text-sm text-gray-400 dark:text-gray-600">
             Start a conversation...
           </div>
@@ -112,7 +152,12 @@ export default function TranscriptPanel({ messages, isCollapsed, onToggle }) {
             {messages.map((msg) => (
               <MessageBubble key={msg.id || msg.tempId} message={msg} />
             ))}
-            {isStreaming && <StreamingMessage text={currentText} />}
+            {/* Active streaming preview */}
+            {isActivelyStreaming && <StreamingMessage text={currentText} isInterrupted={false} />}
+            {/* Interrupted partial text (orange styling) — #96 */}
+            {isInterrupted && !isActivelyStreaming && (
+              <StreamingMessage text={partialText} isInterrupted={true} />
+            )}
           </>
         )}
       </div>

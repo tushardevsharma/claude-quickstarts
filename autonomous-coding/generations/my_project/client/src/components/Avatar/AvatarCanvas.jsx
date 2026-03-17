@@ -353,6 +353,8 @@ function drawStateGlow(ctx, cx, H, W, state) {
     [STATES.THINKING]: 'rgba(245,158,11,0.11)',
     [STATES.SPEAKING]: 'rgba(16,185,129,0.13)',
     [STATES.ERROR]: 'rgba(239,68,68,0.13)',
+    [STATES.INTERRUPTED]: 'rgba(249,115,22,0.13)',  // orange glow
+    [STATES.CONNECTING]: 'rgba(156,163,175,0.10)',  // subtle gray glow
   };
   const color = colors[state];
   if (!color) return;

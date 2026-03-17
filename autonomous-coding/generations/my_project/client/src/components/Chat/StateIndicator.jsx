@@ -36,11 +36,20 @@ const STATE_CONFIG = {
     animate: false,
     show: true,
   },
+  // #93 — Connecting state (gray spinner, shown briefly at start of each request)
   [STATES.CONNECTING]: {
     label: 'Connecting...',
     color: 'text-gray-400',
     dot: 'bg-gray-400',
     animate: true,
+    show: true,
+  },
+  // #91 — Interrupted state (orange, briefly shown after stop button)
+  [STATES.INTERRUPTED]: {
+    label: 'Interrupted',
+    color: 'text-orange-500',
+    dot: 'bg-orange-500',
+    animate: false,
     show: true,
   },
 };
@@ -59,9 +68,16 @@ export default function StateIndicator({ state }) {
   return (
     <div className={`flex items-center gap-2 h-6 ${config.color} animate-fade-in`}>
       <div className={`relative flex items-center justify-center`}>
-        <span className={`w-2 h-2 rounded-full ${config.dot}`}></span>
-        {config.animate && (
-          <span className={`absolute w-2 h-2 rounded-full ${config.dot} animate-ping opacity-75`}></span>
+        {/* Connecting: spinning ring instead of dot */}
+        {state === STATES.CONNECTING ? (
+          <span className="w-2.5 h-2.5 border border-gray-400 border-t-transparent rounded-full animate-spin" />
+        ) : (
+          <>
+            <span className={`w-2 h-2 rounded-full ${config.dot}`}></span>
+            {config.animate && (
+              <span className={`absolute w-2 h-2 rounded-full ${config.dot} animate-ping opacity-75`}></span>
+            )}
+          </>
         )}
       </div>
       <span className="text-xs font-medium">{config.label}</span>
@@ -95,6 +111,13 @@ export default function StateIndicator({ state }) {
             />
           ))}
         </div>
+      )}
+
+      {/* Interrupted: slash icon */}
+      {state === STATES.INTERRUPTED && (
+        <svg className="w-3 h-3 opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M18.364 5.636L5.636 18.364M5.636 5.636l12.728 12.728" />
+        </svg>
       )}
     </div>
   );

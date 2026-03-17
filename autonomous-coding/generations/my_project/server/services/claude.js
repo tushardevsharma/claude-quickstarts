@@ -44,6 +44,30 @@ function getAnthropicClient() {
   return _anthropicClient;
 }
 
+// ─── Retry helper (429 rate limit with exponential backoff) ───────────────────
+async function withRetry(fn, maxRetries = 3, signal) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      const is429 =
+        err.$metadata?.httpStatusCode === 429 ||
+        err.status === 429 ||
+        err.statusCode === 429 ||
+        err.name === 'ThrottlingException' ||
+        (err.message && err.message.toLowerCase().includes('throttl'));
+      if (is429 && attempt < maxRetries) {
+        const delay = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
+        console.warn(`[Claude] Rate limited (429), retry ${attempt + 1}/${maxRetries} in ${delay}ms`);
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 // ─── Bedrock streaming ────────────────────────────────────────────────────────
 async function streamViaBedrock({ messages, systemPrompt, model, onToken, onComplete, onError, signal }) {
   const client = getBedrockClient();
@@ -65,7 +89,7 @@ async function streamViaBedrock({ messages, systemPrompt, model, onToken, onComp
 
   let fullText = '';
   try {
-    const response = await client.send(command);
+    const response = await withRetry(() => client.send(command), 3, signal);
     for await (const chunk of response.body) {
       if (signal?.aborted) break;
       if (chunk.chunk?.bytes) {
@@ -81,10 +105,14 @@ async function streamViaBedrock({ messages, systemPrompt, model, onToken, onComp
         }
       }
     }
-    if (onComplete) onComplete(fullText);
+    const wasAborted = signal?.aborted ?? false;
+    if (onComplete) onComplete(fullText, wasAborted);
     return fullText;
   } catch (err) {
-    if (signal?.aborted) return '';
+    if (signal?.aborted) {
+      if (onComplete) onComplete(fullText, true);
+      return fullText;
+    }
     console.error('[Claude/Bedrock]', err.message);
     if (onError) onError(err);
     throw err;
@@ -98,12 +126,16 @@ async function streamViaDirect({ messages, systemPrompt, model, onToken, onCompl
   let fullText = '';
 
   try {
-    const stream = await client.messages.stream({
-      model: modelId,
-      max_tokens: 1024,
-      system: systemPrompt,
-      messages,
-    });
+    const stream = await withRetry(
+      () => client.messages.stream({
+        model: modelId,
+        max_tokens: 1024,
+        system: systemPrompt,
+        messages,
+      }),
+      3,
+      signal
+    );
 
     for await (const chunk of stream) {
       if (signal?.aborted) { stream.controller?.abort(); break; }
@@ -113,10 +145,14 @@ async function streamViaDirect({ messages, systemPrompt, model, onToken, onCompl
         if (onToken) onToken(token);
       }
     }
-    if (onComplete) onComplete(fullText);
+    const wasAborted = signal?.aborted ?? false;
+    if (onComplete) onComplete(fullText, wasAborted);
     return fullText;
   } catch (err) {
-    if (err.name === 'AbortError' || signal?.aborted) return '';
+    if (err.name === 'AbortError' || signal?.aborted) {
+      if (onComplete) onComplete(fullText, true);
+      return fullText;
+    }
     console.error('[Claude/Direct]', err.message);
     if (onError) onError(err);
     throw err;
@@ -169,6 +205,61 @@ export async function generateTitle(userMsg, assistantMsg) {
   } catch (err) {
     console.warn('[Claude] Title gen failed:', err.message);
     return 'New Conversation';
+  }
+}
+
+/**
+ * Generate a rolling summary of older messages using Haiku.
+ * Takes the last 40 messages and summarizes the first 20 (older half).
+ */
+export async function generateSummary(messages) {
+  if (!messages || messages.length < 20) return null;
+
+  // Summarize the older half of the provided messages
+  const toSummarize = messages.slice(0, Math.ceil(messages.length / 2));
+  const msgText = toSummarize
+    .map((m) => `${m.role}: ${m.content.slice(0, 400)}`)
+    .join('\n');
+
+  const prompt = `Summarize this conversation section in 2-3 sentences. Focus on key topics, decisions, and important context:\n\n${msgText}`;
+
+  try {
+    if (useBedrock()) {
+      const client = getBedrockClient();
+      const body = JSON.stringify({
+        anthropic_version: 'bedrock-2023-05-31',
+        max_tokens: 200,
+        messages: [{ role: 'user', content: prompt }],
+      });
+      const cmd = new InvokeModelWithResponseStreamCommand({
+        modelId: bedrockHaikuModel(),
+        contentType: 'application/json',
+        accept: 'application/json',
+        body,
+      });
+      const res = await client.send(cmd);
+      let summary = '';
+      for await (const chunk of res.body) {
+        if (chunk.chunk?.bytes) {
+          try {
+            const d = JSON.parse(Buffer.from(chunk.chunk.bytes).toString('utf-8'));
+            if (d.type === 'content_block_delta' && d.delta?.type === 'text_delta') summary += d.delta.text;
+          } catch {}
+        }
+      }
+      return summary.trim() || null;
+    } else {
+      const client = getAnthropicClient();
+      const res = await client.messages.create({
+        model: DIRECT_HAIKU,
+        max_tokens: 200,
+        messages: [{ role: 'user', content: prompt }],
+      });
+      return res.content[0].text.trim() || null;
+    }
+  } catch (err) {
+    console.warn('[Claude] Summary gen failed:', err.message);
+    return null;
   }
 }
 

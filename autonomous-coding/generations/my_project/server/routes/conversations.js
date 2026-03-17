@@ -9,7 +9,7 @@ router.get('/', (req, res) => {
   const db = getDatabase();
   const conversations = db
     .prepare(
-      `SELECT id, title, created_at, updated_at, model, persona_id, is_archived
+      `SELECT id, title, created_at, updated_at, model, active_model, persona_id, is_archived
        FROM conversations
        WHERE is_archived = 0
        ORDER BY updated_at DESC
@@ -50,7 +50,7 @@ router.get('/:id', (req, res) => {
 
   const messages = db
     .prepare(
-      `SELECT id, role, content, audio_duration_ms, was_interrupted, created_at
+      `SELECT id, role, content, model_id, audio_duration_ms, was_interrupted, created_at
        FROM messages
        WHERE conversation_id = ?
        ORDER BY created_at ASC`
