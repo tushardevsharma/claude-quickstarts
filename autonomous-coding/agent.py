@@ -12,7 +12,7 @@ from typing import Optional
 from claude_code_sdk import ClaudeSDKClient
 
 from client import create_client
-from progress import print_session_header, print_progress_summary, check_spec_changed
+from progress import print_session_header, print_progress_summary, check_spec_changed, save_snapshot
 from prompts import get_initializer_prompt, get_coding_prompt, get_spec_sync_prompt, copy_spec_to_project, get_spec_checksum
 
 
@@ -183,6 +183,8 @@ async def run_autonomous_agent(
         elif check_spec_changed(project_dir, current_checksum):
             prompt = get_spec_sync_prompt()
         else:
+            # Snapshot current passing tests so we can highlight new wins after the session
+            save_snapshot(project_dir)
             prompt = get_coding_prompt()
 
         # Run session with async context manager
