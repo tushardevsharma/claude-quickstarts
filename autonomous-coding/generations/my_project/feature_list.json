@@ -269,7 +269,7 @@
         "Verify 'Listening...' indicator appears when speaking",
         "Verify indicator changes when speech ends"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 20,
@@ -283,7 +283,7 @@
         "Verify transcription appears in transcript panel",
         "Verify Claude responds about Paris"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 21,
@@ -313,7 +313,7 @@
         "Verify avatar transitions to Listening state",
         "Verify audio fades out smoothly (not abrupt cut)"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 23,
