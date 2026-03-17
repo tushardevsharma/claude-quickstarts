@@ -2,6 +2,7 @@
  * AudioPlayer: Manages TTS audio playback using Web Audio API.
  * Supports browser speech synthesis (fallback) and binary audio chunks (ElevenLabs).
  * Drives lip-sync via AnalyserNode.
+ * Implements a queue for gapless audio chunk overlap (#100).
  */
 export class AudioPlayer {
   constructor({ onStart, onEnd, onMouthOpenness, volume = 0.8 }) {
@@ -21,10 +22,15 @@ export class AudioPlayer {
     this.rafId = null;
     this.currentUtterance = null;
     this.currentSource = null;
+
+    // Gapless audio queue — #100
+    this.audioBufferQueue = [];
+    this.isPlayingAudio = false;
   }
 
   /**
    * Initialize Web Audio context (must be called after user gesture).
+   * Automatically resumes suspended context — #83
    */
   initAudioContext() {
     if (this.audioContext) return;
@@ -95,40 +101,70 @@ export class AudioPlayer {
   }
 
   /**
-   * Play binary audio (MP3/PCM) from a fetch response.
+   * Decode and queue audio buffer for gapless sequential playback.
+   * TTS for sentence N+1 begins synthesizing before sentence N finishes — #100.
+   * AudioContext is auto-resumed if suspended — #83.
    */
   async playAudioBuffer(arrayBuffer) {
     if (!this.audioContext) this.initAudioContext();
 
     try {
+      // Resume suspended AudioContext (#83 — browser autoplay policy)
       if (this.audioContext.state === 'suspended') {
         await this.audioContext.resume();
       }
 
       const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
-      const source = this.audioContext.createBufferSource();
-      source.buffer = audioBuffer;
-      source.connect(this.gainNode);
 
-      // Connect analyser for lip-sync
-      source.connect(this.analyser);
+      // Enqueue decoded buffer — gapless queue (#100)
+      this.audioBufferQueue.push(audioBuffer);
 
-      this.currentSource = source;
-
-      source.onended = () => {
-        this.isSpeaking = false;
-        this._stopLipSync();
-        if (this.onEnd) this.onEnd();
-      };
-
-      source.start();
-      this.isSpeaking = true;
-      if (this.onStart) this.onStart();
-      this._startLipSyncFromAnalyser();
+      // Start playing if not already in progress
+      if (!this.isPlayingAudio) {
+        this._playNextBuffer();
+      }
     } catch (err) {
       console.error('[AudioPlayer] Audio buffer error:', err.message);
       if (this.onEnd) this.onEnd();
     }
+  }
+
+  /**
+   * Play the next decoded buffer from the queue.
+   * Called recursively via source.onended for seamless chaining.
+   */
+  _playNextBuffer() {
+    if (this.audioBufferQueue.length === 0) {
+      this.isPlayingAudio = false;
+      this.isSpeaking = false;
+      this._stopLipSync();
+      if (this.onEnd) this.onEnd();
+      return;
+    }
+
+    this.isPlayingAudio = true;
+    const audioBuffer = this.audioBufferQueue.shift();
+
+    const source = this.audioContext.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(this.gainNode);
+    source.connect(this.analyser);
+
+    this.currentSource = source;
+
+    source.onended = () => {
+      this._stopLipSync();
+      // Chain immediately to next buffer for gapless playback
+      this._playNextBuffer();
+    };
+
+    source.start();
+
+    if (!this.isSpeaking) {
+      this.isSpeaking = true;
+      if (this.onStart) this.onStart();
+    }
+    this._startLipSyncFromAnalyser();
   }
 
   /**
@@ -187,13 +223,17 @@ export class AudioPlayer {
   }
 
   /**
-   * Fade out and stop audio (for interrupts).
+   * Fade out and stop audio (for interrupts). #95 — 100ms fade
    */
   fadeOut(durationMs = 100) {
     // Stop browser TTS
     if (window.speechSynthesis) {
       window.speechSynthesis.cancel();
     }
+
+    // Clear queue so no more buffers play after fade
+    this.audioBufferQueue = [];
+    this.isPlayingAudio = false;
 
     // Fade out Web Audio
     if (this.gainNode && this.audioContext) {
@@ -207,7 +247,9 @@ export class AudioPlayer {
           this.currentSource = null;
         }
         // Restore gain
-        this.gainNode.gain.setValueAtTime(this.volume, this.audioContext.currentTime);
+        if (this.gainNode && this.audioContext) {
+          this.gainNode.gain.setValueAtTime(this.volume, this.audioContext.currentTime);
+        }
       }, durationMs + 20);
     }
 
@@ -228,6 +270,10 @@ export class AudioPlayer {
       try { this.currentSource.stop(); } catch {}
       this.currentSource = null;
     }
+
+    // Clear audio queue
+    this.audioBufferQueue = [];
+    this.isPlayingAudio = false;
 
     this.isSpeaking = false;
     this.utteranceQueue = [];

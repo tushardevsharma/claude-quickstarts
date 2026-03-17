@@ -13,6 +13,20 @@ export const STATES = {
   INTERRUPTED: 'interrupted',
 };
 
+// Sentiment-based expression detection (#88-90)
+const EXPRESSION_PATTERNS = {
+  surprised: /(!{2,}|wow|amazing|incredible|oh my|unbelievable|no way|really\?|seriously\?|what\?!)/i,
+  empathetic: /(sorry|i understand|that must|must be hard|i can imagine|i feel|how difficult|that's tough|i'm here|must be)/i,
+  positive: /(great|excellent|wonderful|fantastic|perfect|absolutely|happy to|love that|awesome|that's great|brilliant)/i,
+};
+
+function detectExpression(text) {
+  if (EXPRESSION_PATTERNS.surprised.test(text)) return 'surprised';
+  if (EXPRESSION_PATTERNS.empathetic.test(text)) return 'empathetic';
+  if (EXPRESSION_PATTERNS.positive.test(text)) return 'positive';
+  return null;
+}
+
 // Minimum time between interrupt events (ms) — #97 rate limiting
 const INTERRUPT_COOLDOWN_MS = 1000;
 
@@ -24,6 +38,7 @@ const initialState = {
   generationId: null,
   currentText: '', // streaming text being built
   partialText: '', // text at the moment of interrupt (shown as partial bubble)
+  expression: null, // 'surprised' | 'empathetic' | 'positive' | null
   error: null,
   isMicEnabled: false,
   lastUserMessage: null, // stored for retry after error
@@ -43,6 +58,8 @@ function reducer(state, action) {
       return { ...state, currentText: '', partialText: '' };
     case 'SAVE_PARTIAL':
       return { ...state, partialText: state.currentText };
+    case 'SET_EXPRESSION':
+      return { ...state, expression: action.payload };
     case 'SET_LAST_MESSAGE':
       return { ...state, lastUserMessage: action.payload };
     case 'SET_ERROR':
@@ -64,10 +81,26 @@ export function PipelineProvider({ children, onMessage }) {
   const isSpeakingRef = useRef(false);
   // Rate limiting for interrupts — #97
   const lastInterruptTimeRef = useRef(0);
+  // Expression auto-clear timer
+  const expressionTimerRef = useRef(null);
 
   // Register audio player
   const registerAudioPlayer = useCallback((player) => {
     audioPlayerRef.current = player;
+  }, []);
+
+  // Set expression with auto-reset after delay
+  const setExpressionWithTimer = useCallback((expr) => {
+    if (expressionTimerRef.current) {
+      clearTimeout(expressionTimerRef.current);
+    }
+    dispatch({ type: 'SET_EXPRESSION', payload: expr });
+    if (expr) {
+      expressionTimerRef.current = setTimeout(() => {
+        dispatch({ type: 'SET_EXPRESSION', payload: null });
+        expressionTimerRef.current = null;
+      }, 3000);
+    }
   }, []);
 
   // Send a message through the pipeline
@@ -99,12 +132,13 @@ export function PipelineProvider({ children, onMessage }) {
       dispatch({ type: 'CLEAR_ERROR' });
       dispatch({ type: 'SET_LAST_MESSAGE', payload: { text, conversationId: convId } });
 
-      // Notify parent about user message
+      // Notify parent about user message (includes genId for stale audio prevention)
       if (onMessage) {
         onMessage({
           type: 'user_message',
           text,
           conversationId: convId,
+          generationId: genId,
         });
       }
 
@@ -132,10 +166,15 @@ export function PipelineProvider({ children, onMessage }) {
               dispatch({ type: 'APPEND_TEXT', payload: event.token });
               break;
 
-            case 'sentence':
+            case 'sentence': {
               // Queue sentence for TTS playback
               sentenceQueueRef.current.push(event.text);
               dispatch({ type: 'SET_STATE', payload: STATES.SPEAKING });
+
+              // Sentiment expression detection — #88-90
+              const expr = detectExpression(event.text);
+              if (expr) setExpressionWithTimer(expr);
+
               // Notify for audio player to pick up
               if (onMessage) {
                 onMessage({
@@ -147,6 +186,7 @@ export function PipelineProvider({ children, onMessage }) {
                 });
               }
               break;
+            }
 
             case 'complete':
               if (event.conversation_id) {
@@ -172,7 +212,7 @@ export function PipelineProvider({ children, onMessage }) {
         },
       });
     },
-    [state.conversationId, onMessage]
+    [state.conversationId, onMessage, setExpressionWithTimer]
   );
 
   // Interrupt current generation

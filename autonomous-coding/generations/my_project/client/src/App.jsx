@@ -405,22 +405,47 @@ export default function App() {
 }
 
 function PipelineWrapper({ sharedAudioRef }) {
+  // Track current generation ID to prevent stale audio from playing — #85
+  const currentGenIdRef = useRef(null);
+
   // Handle pipeline messages at this level, where we have access to sharedAudioRef
   const handleMessage = useCallback((event) => {
     switch (event.type) {
-      case 'sentence_ready':
+      case 'user_message':
+        // Update current generation ID when a new message is sent
+        if (event.generationId) {
+          currentGenIdRef.current = event.generationId;
+        }
+        break;
+
+      case 'sentence_ready': {
+        // Stale audio prevention: discard TTS from old generations — #85
+        if (event.generationId && currentGenIdRef.current &&
+            event.generationId !== currentGenIdRef.current) {
+          console.debug('[TTS] Discarding stale audio for gen:', event.generationId);
+          break;
+        }
         if (!sharedAudioRef.current) break;
+        const capturedGenId = event.generationId;
         if (event.ttsMode === 'elevenlabs') {
           fetchTTSAudio(event.text)
-            .then((arrayBuffer) => sharedAudioRef.current?.playAudioBuffer(arrayBuffer))
+            .then((arrayBuffer) => {
+              // Re-check generation ID when fetch completes (async guard)
+              if (capturedGenId && currentGenIdRef.current &&
+                  capturedGenId !== currentGenIdRef.current) return;
+              sharedAudioRef.current?.playAudioBuffer(arrayBuffer);
+            })
             .catch((err) => {
               console.warn('[TTS] ElevenLabs failed, falling back to browser TTS:', err.message);
+              if (capturedGenId && currentGenIdRef.current &&
+                  capturedGenId !== currentGenIdRef.current) return;
               sharedAudioRef.current?.speakBrowser(event.text);
             });
         } else {
           sharedAudioRef.current.speakBrowser(event.text);
         }
         break;
+      }
 
       case 'generation_complete':
         // Notify CompanionApp to reload messages

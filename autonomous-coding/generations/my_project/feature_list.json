@@ -1157,7 +1157,7 @@
         "Verify avatar closes mouth naturally during brief gaps",
         "Verify audio resumes smoothly"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 81,
@@ -1173,7 +1173,7 @@
         "Verify avatar animation resumes correctly",
         "Verify no errors in the console"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 82,
@@ -1232,7 +1232,7 @@
         "Send a new message and verify only the new response audio plays",
         "Verify no 'ghost' audio from the old generation appears"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 86,
@@ -1275,7 +1275,7 @@
         "Verify the avatar briefly shows wide eyes and raised eyebrows (surprised expression)",
         "Take screenshot of the surprised state"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 89,
@@ -1289,7 +1289,7 @@
         "Verify avatar shows softened eyes and slight empathetic smile",
         "Take screenshot of the empathetic state"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 90,
@@ -1303,7 +1303,7 @@
         "Verify default speaking state is Neutral when no sentiment keywords are detected",
         "Verify expressions transition smoothly (no abrupt snapping)"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": 91,
@@ -1453,7 +1453,7 @@
         "Verify playback is continuous and natural-sounding",
         "Check network tab to confirm TTS requests for subsequent sentences begin before prior audio finishes"
       ],
-      "passes": false
+      "passes": true
     }
   ]
 }

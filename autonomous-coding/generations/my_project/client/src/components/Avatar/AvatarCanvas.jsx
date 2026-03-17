@@ -1,6 +1,6 @@
 import { useRef, useEffect } from 'react';
 import { IdleAnimator } from './IdleAnimator.js';
-import { STATES } from '../../context/PipelineContext.jsx';
+import { STATES, usePipeline } from '../../context/PipelineContext.jsx';
 import { useApp } from '../../context/AppContext.jsx';
 
 // Color palette
@@ -24,7 +24,7 @@ const PAL = {
 /**
  * Draw the full avatar face onto the canvas.
  */
-function drawAvatar(ctx, W, H, anim, avatarState, mouthOpenness) {
+function drawAvatar(ctx, W, H, anim, avatarState, mouthOpenness, expression) {
   const cx = W / 2;
 
   ctx.clearRect(0, 0, W, H);
@@ -119,10 +119,25 @@ function drawAvatar(ctx, W, H, anim, avatarState, mouthOpenness) {
   const gazeX = anim.gazeX || 0;
   const gazeY = anim.gazeY || 0;
 
-  // Eye width modifier based on state
-  let eyeWMod = 1.0;
-  if (avatarState === STATES.LISTENING) eyeWMod = 1.12;
-  if (avatarState === STATES.THINKING) eyeWMod = 0.88;
+  // Expression modifiers — #88-90 sentiment-based expressions
+  let exprEyeWMod = 0;
+  let exprLift = 0;
+  let exprFurrow = 0;
+  if (expression === 'surprised') {
+    exprEyeWMod = 0.30;  // wide eyes
+    exprLift = -8;       // raised eyebrows
+  } else if (expression === 'empathetic') {
+    exprEyeWMod = -0.08; // slightly softer eyes
+    exprFurrow = 1.5;    // slight concern furrow
+  } else if (expression === 'positive') {
+    exprEyeWMod = 0.08;  // bright eyes
+    exprLift = -2;       // slight brow lift
+  }
+
+  // Eye width modifier based on state + expression
+  let eyeWMod = 1.0 + exprEyeWMod;
+  if (avatarState === STATES.LISTENING) eyeWMod = Math.max(eyeWMod, 1.0) * 1.12;
+  if (avatarState === STATES.THINKING) eyeWMod = Math.min(eyeWMod, 1.0) * 0.88;
 
   const eyeRX = faceW * 0.155 * eyeWMod;
   const eyeRY = faceH * 0.095 * eyeOpenness;
@@ -134,8 +149,8 @@ function drawAvatar(ctx, W, H, anim, avatarState, mouthOpenness) {
   const browY = eyeY - faceH * 0.14;
   const browW = faceW * 0.20;
   const browThick = Math.max(H * 0.012, 2.5);
-  const furrow = avatarState === STATES.THINKING ? 2.5 : 0;
-  const lift = avatarState === STATES.LISTENING ? -3 : 0;
+  const furrow = (avatarState === STATES.THINKING ? 2.5 : 0) + exprFurrow;
+  const lift = (avatarState === STATES.LISTENING ? -3 : 0) + exprLift;
 
   ctx.strokeStyle = PAL.eyebrow;
   ctx.lineWidth = browThick;
@@ -166,7 +181,7 @@ function drawAvatar(ctx, W, H, anim, avatarState, mouthOpenness) {
 
   // ─── Layer 5: Mouth ───────────────────────────────────────────────────────
   const mouthY = faceY + faceH * 0.30;
-  drawMouth(ctx, faceX, mouthY, faceW, faceH, mouthOpenness, avatarState);
+  drawMouth(ctx, faceX, mouthY, faceW, faceH, mouthOpenness, avatarState, expression);
 
   // ─── Layer 6: Front hair (top of head cap, drawn over face top) ───────────
   drawFrontHair(ctx, faceX, faceY, faceW, faceH);
@@ -243,10 +258,15 @@ function drawEye(ctx, x, y, rX, rY, gazeX, gazeY) {
   }
 }
 
-function drawMouth(ctx, x, y, faceW, faceH, openness, state) {
+function drawMouth(ctx, x, y, faceW, faceH, openness, state, expression) {
   const mW = faceW * 0.34;
   const lipH = faceH * 0.055;
-  const smiling = state !== STATES.LISTENING ? 0.4 : 0;
+  // Expression-modified smile amount
+  let smileBonus = 0;
+  if (expression === 'positive') smileBonus = 0.3;
+  if (expression === 'surprised') smileBonus = -0.1; // slightly less smile when surprised
+  if (expression === 'empathetic') smileBonus = 0.1;  // soft gentle smile
+  const smiling = (state !== STATES.LISTENING ? 0.4 : 0) + smileBonus;
 
   if (openness < 0.07) {
     // Closed mouth with slight smile
@@ -373,11 +393,18 @@ export default function AvatarCanvas({ avatarState, mouthOpenness = 0 }) {
   const animatorRef = useRef(new IdleAnimator());
   const rafRef = useRef(null);
   const mouthRef = useRef(mouthOpenness);
+  const expressionRef = useRef(null);
   const { idleAnimationIntensity } = useApp();
+  const { expression } = usePipeline();
 
   useEffect(() => {
     mouthRef.current = mouthOpenness;
   }, [mouthOpenness]);
+
+  // Track expression in a ref so the render loop always sees the latest value
+  useEffect(() => {
+    expressionRef.current = expression;
+  }, [expression]);
 
   useEffect(() => {
     animatorRef.current.setSpeaking(avatarState === STATES.SPEAKING);
@@ -398,7 +425,7 @@ export default function AvatarCanvas({ avatarState, mouthOpenness = 0 }) {
       if (W > 0 && H > 0) {
         const ctx = canvas.getContext('2d');
         const anim = animatorRef.current.update(time);
-        drawAvatar(ctx, W, H, anim, avatarState, mouthRef.current);
+        drawAvatar(ctx, W, H, anim, avatarState, mouthRef.current, expressionRef.current);
       }
       rafRef.current = requestAnimationFrame(loop);
     };
