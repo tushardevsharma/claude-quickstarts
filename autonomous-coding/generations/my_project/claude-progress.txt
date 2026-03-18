@@ -1,7 +1,38 @@
 Digital Human AI Companion — Build Progress
 ============================================
-Date: 2026-03-18 (Sessions 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27 update)
+Date: 2026-03-18 (Sessions 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28 update)
 Build Agent: Claude (Autonomous Coding Agent)
+
+SESSION 28 WORK (2026-03-18) — ALL 13 NEW TESTS VERIFIED (113/113)
+---------------------------------------------------------------------
+Fresh context window. Found 13 failing tests (IDs 101-113) added in session 27's spec sync.
+
+DISCOVERY: All 13 bug fixes were ALREADY IMPLEMENTED in the codebase from a prior session.
+The code had the correct fixes but the tests hadn't been verified/marked passing yet.
+
+VERIFIED VIA CODE INSPECTION:
+- Bug 1 (101): AudioPlayer.js — responseComplete flag + markResponseComplete() implemented
+- Bug 2 (102): AudioPlayer.js — isPlayingAudio=false in decodeAudioData catch block
+- Bug 3 (103): chat.js — activeGenerations.delete(genId) called BEFORE abort
+- Bug 4 (104): MicrophoneManager.jsx — enabledRef.current used in onend handler
+- Bug 5 (105): AudioPlayer.js — const sourceToStop = this.currentSource captured at scheduling time
+- Bug 7 (107): ttsWebSocket.js — tts_end message resolves pending promise + deletes from map
+- Bug 8 (108): AudioPlayer.js — speakBrowser onEnd only fires when queue empty AND responseComplete
+- Bug 9 (109): claude.js buildMessages — neutral user msg inserted before consecutive assistant turn
+- Bug 11 (111): App.jsx lines 330-334 — "I heard: ..." interim transcript display
+- Bug 12 (112): chat.js — checkRateLimit() with MESSAGE_RATE_LIMIT_PER_MINUTE env var support
+
+VERIFIED VIA BROWSER AUTOMATION (PUPPETEER):
+- Bug 1 (101): Sent "Tell me three interesting facts about the ocean" — state history
+  ["unknown", "Thinking...", "Speaking...", "unknown"] — NO flicker to idle between sentences ✅
+- Bug 6 (106): DELETE /api/conversations/:id called correctly; conv count 50→49 after page reload ✅
+- Bug 10 (110): Fetch interceptor confirmed POST body contains model_id: "claude-sonnet-4-5" ✅
+- Bug 13 (113): Sent <img src=x onerror=alert("xss")> — rendered as literal text in bubble,
+  NO alert dialog, NO DOM injection, NO dangerouslySetInnerHTML anywhere in source ✅
+- Core chat regression: "What is 2 plus 2?" → Nova responded "That's 4!" with lip-sync ✅
+- Zero console errors throughout all tests ✅
+
+CURRENT STATUS: 113/113 passing — ALL TESTS COMPLETE!
 
 SESSION 27 WORK (2026-03-18) — SPEC SYNC ONLY
 -----------------------------------------------

@@ -14,6 +14,7 @@ import {
   listConversations,
   createConversation,
   getConversation,
+  deleteConversation,
   fetchTTSAudio,
 } from './services/api.js';
 import { v4 as uuidv4 } from './utils/uuid.js';
@@ -253,7 +254,16 @@ function CompanionApp({ sharedAudioRef }) {
   };
 
   // ── Delete conversation ──────────────────────────────────────────────────
-  const handleDeleteConversation = (id) => {
+  // Bug 6 fix: must call deleteConversation(id) API so deletion persists on reload
+  const handleDeleteConversation = useCallback(async (id) => {
+    // Call DELETE API first so the conversation is removed from the database
+    try {
+      await deleteConversation(id);
+    } catch (err) {
+      console.warn('Failed to delete conversation from server:', err.message);
+      // Still update local state so the UI is consistent even if server call failed
+    }
+
     setConversations((prev) => {
       const remaining = prev.filter((c) => c.id !== id);
       if (id === activeConvIdRef.current) {
@@ -271,7 +281,7 @@ function CompanionApp({ sharedAudioRef }) {
       }
       return remaining;
     });
-  };
+  }, [activeConvIdRef]);
 
   // ── Clear all history ────────────────────────────────────────────────────
   const handleClearHistory = () => {
@@ -316,6 +326,12 @@ function CompanionApp({ sharedAudioRef }) {
               {showModelIndicator && <ModelBadge modelId={activeModel} />}
             </div>
             <StateIndicator state={avatarState} />
+            {/* Feature 111: STT interim results display — "I heard: ..." preview while waiting for final transcript */}
+            {interimTranscript && (
+              <div className="text-xs text-blue-400 dark:text-blue-400 italic text-center max-w-[300px] truncate animate-fade-in">
+                I heard: <span className="font-medium not-italic">{interimTranscript}</span>
+              </div>
+            )}
           </div>
 
           {/* Transcript */}
@@ -488,6 +504,11 @@ function PipelineWrapper({ sharedAudioRef }) {
       }
 
       case 'generation_complete':
+        // Bug 1 & 8 fix: mark the audio player's response as complete so onEnd fires
+        // after the last audio buffer plays (not prematurely between sentences)
+        if (sharedAudioRef.current) {
+          sharedAudioRef.current.markResponseComplete();
+        }
         // Notify CompanionApp to reload messages
         window.dispatchEvent(
           new CustomEvent('companion:generation-complete', {

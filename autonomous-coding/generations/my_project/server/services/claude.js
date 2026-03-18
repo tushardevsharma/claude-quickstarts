@@ -271,10 +271,21 @@ export function buildMessages(messages, summary = null) {
     .map(m => ({ role: m.role, content: m.content }));
 
   if (summary && msgs.length > 0) {
+    // Bug 9 fix: after injecting a [user, assistant] summary pair, the first real message
+    // must not also be an assistant turn — that would produce consecutive assistant turns
+    // which causes a 400 error from the Claude API.
+    let realMsgs = msgs;
+    if (msgs[0].role === 'assistant') {
+      // Insert a neutral user continuation message to break the consecutive assistant turns
+      realMsgs = [
+        { role: 'user', content: '[Continuing our conversation]' },
+        ...msgs,
+      ];
+    }
     msgs = [
       { role: 'user', content: `[Conversation summary: ${summary}]` },
       { role: 'assistant', content: 'I have context from our earlier conversation.' },
-      ...msgs,
+      ...realMsgs,
     ];
   }
   return msgs;

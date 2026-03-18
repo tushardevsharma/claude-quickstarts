@@ -87,8 +87,10 @@ export async function checkHealth() {
 /**
  * Stream a chat message via SSE.
  * Returns an object with an abort() method.
+ * Bug 10 fix: model_id is now included in the POST body so the server uses the
+ * correct model immediately (no stale DB value race condition).
  */
-export function streamMessage({ text, conversationId, generationId, onEvent, onError, onComplete }) {
+export function streamMessage({ text, conversationId, generationId, modelId, onEvent, onError, onComplete }) {
   const controller = new AbortController();
 
   fetch(`${API_BASE}/chat/stream`, {
@@ -98,6 +100,7 @@ export function streamMessage({ text, conversationId, generationId, onEvent, onE
       text,
       conversation_id: conversationId,
       generation_id: generationId,
+      model_id: modelId,  // Bug 10 fix: forward model_id from client
     }),
     signal: controller.signal,
   })

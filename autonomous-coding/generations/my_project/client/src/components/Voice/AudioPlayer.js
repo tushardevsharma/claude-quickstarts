@@ -3,6 +3,12 @@
  * Supports browser speech synthesis (fallback) and binary audio chunks (ElevenLabs).
  * Drives lip-sync via AnalyserNode.
  * Implements a queue for gapless audio chunk overlap (#100).
+ *
+ * Bug fixes:
+ *  - Bug 1: onEnd only fires when queue empty AND responseComplete=true (#101)
+ *  - Bug 2: isPlayingAudio reset on decodeAudioData error (#102)
+ *  - Bug 5: fadeOut captures currentSource at scheduling time (#105)
+ *  - Bug 8: speakBrowser onEnd only fires after last utterance AND responseComplete (#108)
  */
 export class AudioPlayer {
   constructor({ onStart, onEnd, onMouthOpenness, volume = 0.8 }) {
@@ -26,6 +32,9 @@ export class AudioPlayer {
     // Gapless audio queue — #100
     this.audioBufferQueue = [];
     this.isPlayingAudio = false;
+
+    // Bug 1 & 8: responseComplete flag — onEnd only fires when this is true AND queue empty
+    this.responseComplete = false;
   }
 
   /**
@@ -53,8 +62,27 @@ export class AudioPlayer {
   }
 
   /**
+   * Signal that the full response has been sent — no more audio buffers are coming.
+   * Bug 1 & 8 fix: onEnd only fires when both the queue is empty AND this is called.
+   * If the queue is already empty when this is called, fire onEnd immediately.
+   */
+  markResponseComplete() {
+    this.responseComplete = true;
+    // If nothing is playing and no buffers or utterances pending, fire onEnd now
+    if (
+      !this.isPlayingAudio &&
+      this.audioBufferQueue.length === 0 &&
+      this.utteranceQueue.length === 0 &&
+      !this.isSpeaking
+    ) {
+      if (this.onEnd) this.onEnd();
+    }
+  }
+
+  /**
    * Speak text using browser's built-in speech synthesis.
    * This is the fallback when ElevenLabs is not configured.
+   * Bug 8 fix: onEnd only fires after the LAST utterance AND responseComplete=true.
    */
   speakBrowser(text, rate = 1.0) {
     if (!window.speechSynthesis) {
@@ -77,22 +105,40 @@ export class AudioPlayer {
     if (preferredVoice) utterance.voice = preferredVoice;
 
     utterance.onstart = () => {
-      this.isSpeaking = true;
-      if (this.onStart) this.onStart();
-      this._startLipSyncFromBrowser();
+      // Only fire onStart and lip-sync if not already speaking (first utterance)
+      if (!this.isSpeaking) {
+        this.isSpeaking = true;
+        if (this.onStart) this.onStart();
+        this._startLipSyncFromBrowser();
+      }
     };
 
     utterance.onend = () => {
-      this.isSpeaking = false;
-      this._stopLipSync();
-      if (this.onEnd) this.onEnd();
+      // Remove this utterance from the queue
+      const idx = this.utteranceQueue.indexOf(utterance);
+      if (idx !== -1) this.utteranceQueue.splice(idx, 1);
+
+      // Only finalize when no more utterances are pending
+      if (this.utteranceQueue.length === 0) {
+        this.isSpeaking = false;
+        this._stopLipSync();
+        // Bug 8 fix: only call onEnd when responseComplete=true (all sentences sent)
+        if (this.responseComplete && this.onEnd) this.onEnd();
+      }
+      // else: more utterances still in queue — keep speaking state active
     };
 
     utterance.onerror = (err) => {
       console.error('[AudioPlayer] Browser TTS error:', err.error);
-      this.isSpeaking = false;
-      this._stopLipSync();
-      if (this.onEnd) this.onEnd();
+      // Remove this utterance from the queue
+      const idx = this.utteranceQueue.indexOf(utterance);
+      if (idx !== -1) this.utteranceQueue.splice(idx, 1);
+
+      if (this.utteranceQueue.length === 0) {
+        this.isSpeaking = false;
+        this._stopLipSync();
+        if (this.responseComplete && this.onEnd) this.onEnd();
+      }
     };
 
     this.currentUtterance = utterance;
@@ -125,6 +171,8 @@ export class AudioPlayer {
       }
     } catch (err) {
       console.error('[AudioPlayer] Audio buffer error:', err.message);
+      // Bug 2 fix: reset isPlayingAudio so subsequent calls are not silently dropped
+      this.isPlayingAudio = false;
       if (this.onEnd) this.onEnd();
     }
   }
@@ -132,13 +180,15 @@ export class AudioPlayer {
   /**
    * Play the next decoded buffer from the queue.
    * Called recursively via source.onended for seamless chaining.
+   * Bug 1 fix: only calls onEnd when queue is empty AND responseComplete=true.
    */
   _playNextBuffer() {
     if (this.audioBufferQueue.length === 0) {
       this.isPlayingAudio = false;
       this.isSpeaking = false;
       this._stopLipSync();
-      if (this.onEnd) this.onEnd();
+      // Bug 1 fix: only fire onEnd if the full response has been delivered
+      if (this.responseComplete && this.onEnd) this.onEnd();
       return;
     }
 
@@ -224,6 +274,7 @@ export class AudioPlayer {
 
   /**
    * Fade out and stop audio (for interrupts). #95 — 100ms fade
+   * Bug 5 fix: capture currentSource in a local variable at scheduling time.
    */
   fadeOut(durationMs = 100) {
     // Stop browser TTS
@@ -235,6 +286,12 @@ export class AudioPlayer {
     this.audioBufferQueue = [];
     this.isPlayingAudio = false;
 
+    // Reset responseComplete for next generation — Bug 1/8 fix
+    this.responseComplete = false;
+
+    // Bug 5 fix: capture currentSource at scheduling time (not inside callback)
+    const sourceToStop = this.currentSource;
+
     // Fade out Web Audio
     if (this.gainNode && this.audioContext) {
       const now = this.audioContext.currentTime;
@@ -242,9 +299,9 @@ export class AudioPlayer {
       this.gainNode.gain.linearRampToValueAtTime(0, now + durationMs / 1000);
 
       setTimeout(() => {
-        if (this.currentSource) {
-          try { this.currentSource.stop(); } catch {}
-          this.currentSource = null;
+        // Bug 5 fix: use captured sourceToStop, not this.currentSource
+        if (sourceToStop) {
+          try { sourceToStop.stop(); } catch {}
         }
         // Restore gain
         if (this.gainNode && this.audioContext) {
@@ -274,6 +331,9 @@ export class AudioPlayer {
     // Clear audio queue
     this.audioBufferQueue = [];
     this.isPlayingAudio = false;
+
+    // Reset responseComplete for next generation — Bug 1/8 fix
+    this.responseComplete = false;
 
     this.isSpeaking = false;
     this.utteranceQueue = [];

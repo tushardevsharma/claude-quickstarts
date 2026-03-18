@@ -222,6 +222,7 @@ export function PipelineProvider({ children, onMessage }) {
         text,
         conversationId: convId,
         generationId: genId,
+        modelId,  // Bug 10 fix: forward modelId so server uses correct model immediately
         onEvent: (event) => {
           if (event.generation_id && event.generation_id !== genId) return;
 

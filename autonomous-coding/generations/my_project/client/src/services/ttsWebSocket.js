@@ -89,6 +89,11 @@ export function connectTtsWebSocket() {
         if (msg.type === 'tts_use_browser') {
           pending.resolve({ mode: 'browser', text: msg.text });
           pendingRequests.delete(msg.request_id);
+        } else if (msg.type === 'tts_end') {
+          // Bug 7 fix: tts_end signals that ElevenLabs audio has been fully sent
+          // Resolve the pending promise so audio plays promptly without 5s timeout
+          pending.resolve({ mode: 'elevenlabs' });
+          pendingRequests.delete(msg.request_id);
         } else if (msg.type === 'tts_error') {
           pending.reject(new Error(msg.message || 'TTS error'));
           pendingRequests.delete(msg.request_id);

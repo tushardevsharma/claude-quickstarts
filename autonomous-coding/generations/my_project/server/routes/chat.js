@@ -6,6 +6,25 @@ import { SentenceSplitter } from '../services/sentence-splitter.js';
 import { isElevenLabsConfigured, synthesizeElevenLabs } from '../services/tts.js';
 import { MODEL_REGISTRY } from './models.js';
 
+// Feature 112: Self-imposed rate limiting — configurable via MESSAGE_RATE_LIMIT_PER_MINUTE env var
+const RATE_LIMIT_PER_MINUTE = parseInt(process.env.MESSAGE_RATE_LIMIT_PER_MINUTE || '20', 10);
+const RATE_WINDOW_MS = 60 * 1000;
+const messageTimestamps = new Map(); // ip -> number[]
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const timestamps = messageTimestamps.get(ip) || [];
+  // Slide window: keep only timestamps within the last minute
+  const recent = timestamps.filter((t) => now - t < RATE_WINDOW_MS);
+  if (recent.length >= RATE_LIMIT_PER_MINUTE) {
+    messageTimestamps.set(ip, recent);
+    return false; // rate limited
+  }
+  recent.push(now);
+  messageTimestamps.set(ip, recent);
+  return true; // OK
+}
+
 // Map user-facing model ID to bedrock model ID
 function resolveBedrockModelId(modelId) {
   const entry = MODEL_REGISTRY.find(m => m.id === modelId);
@@ -86,6 +105,16 @@ router.post('/stream', async (req, res) => {
 
   if (!text || !text.trim()) {
     return res.status(400).json({ error: 'Message text is required' });
+  }
+
+  // Feature 112: Rate limiting check
+  const clientIp = req.ip || req.socket?.remoteAddress || 'unknown';
+  if (!checkRateLimit(clientIp)) {
+    return res.status(429).json({
+      error: `Rate limit exceeded. Maximum ${RATE_LIMIT_PER_MINUTE} messages per minute allowed.`,
+      code: 'RATE_LIMIT',
+      retry_after_ms: RATE_WINDOW_MS,
+    });
   }
 
   const db = getDatabase();
@@ -199,6 +228,19 @@ router.post('/stream', async (req, res) => {
           }
         }
 
+        // Bug 3 fix: if generation was already deleted by interrupt handler (interrupt deletes
+        // BEFORE abort), skip the upsert — the interrupt handler already saved the partial text.
+        // Only one writer wins: interrupt handler or natural completion, not both.
+        const stillActive = activeGenerations.has(genId);
+        if (wasAborted && !stillActive) {
+          // Interrupted — partial text already saved by interrupt endpoint; skip
+          if (!res.writableEnded) {
+            res.write(`data: ${JSON.stringify({ type: 'complete', conversation_id: convId, generation_id: genId, model_id: activeModelId, was_interrupted: true })}\n\n`);
+            res.end();
+          }
+          return;
+        }
+
         // Save assistant message (upsert handles race with interrupt endpoint)
         if (fullText) {
           upsertAssistantMessage(db, {
@@ -269,8 +311,10 @@ router.post('/interrupt', (req, res) => {
       });
     }
 
-    gen.abortController.abort();
+    // Bug 3 fix: delete from map BEFORE abort so onComplete sees an empty map entry
+    // and skips its upsert (only one writer wins)
     activeGenerations.delete(generation_id);
+    gen.abortController.abort();
 
     res.json({ success: true, message: 'Generation interrupted' });
   } else {

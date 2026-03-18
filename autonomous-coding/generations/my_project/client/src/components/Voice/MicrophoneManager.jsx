@@ -12,11 +12,18 @@ export default function MicrophoneManager({ enabled, onTranscript, onStateChange
   const [error, setError] = useState(null);
   const restartTimerRef = useRef(null);
   const isSpeakingRef = useRef(false);
+  // Bug 4 fix: use a ref for enabled state so recognition.onend doesn't capture a stale closure
+  const enabledRef = useRef(enabled);
 
   // Track avatar speaking state for barge-in detection
   useEffect(() => {
     isSpeakingRef.current = avatarState === STATES.SPEAKING;
   }, [avatarState]);
+
+  // Bug 4 fix: keep enabledRef in sync with enabled prop
+  useEffect(() => {
+    enabledRef.current = enabled;
+  }, [enabled]);
 
   const startRecognition = useCallback(() => {
     if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
@@ -111,10 +118,10 @@ export default function MicrophoneManager({ enabled, onTranscript, onStateChange
     };
 
     recognition.onend = () => {
-      // Auto-restart if still enabled
-      if (enabled) {
+      // Bug 4 fix: read enabled from ref (not stale closure) so disabling mid-restart works
+      if (enabledRef.current) {
         restartTimerRef.current = setTimeout(() => {
-          if (enabled && recognitionRef.current) {
+          if (enabledRef.current && recognitionRef.current) {
             try {
               recognitionRef.current.start();
             } catch {}
