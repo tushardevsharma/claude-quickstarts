@@ -33,6 +33,7 @@ ALLOWED_COMMANDS = {
     # Node.js development
     "npm",
     "node",
+    "npx",
     # Version control
     "git",
     # Directory navigation

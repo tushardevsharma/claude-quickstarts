@@ -1182,3 +1182,163 @@ digital-human/
 ├── .env                             # API keys (ANTHROPIC_API_KEY, ELEVENLABS_API_KEY, DEEPGRAM_API_KEY)
 └── README.md
 ```
+
+---
+
+## 17. Known Bugs — Mandatory Fixes
+
+The following bugs have been confirmed by code audit. The autonomous agent MUST fix all of them. Each entry specifies the file, the function/location, a description of the defect, and the required fix.
+
+---
+
+### Bug 1 — AudioPlayer: `_playNextBuffer` fires `onEnd` prematurely between sentences
+
+**File:** `client/src/components/Voice/AudioPlayer.js`
+**Function:** `_playNextBuffer`
+
+**Problem:** Every time the `audioBufferQueue` drains to empty (i.e., between sentence chunks), `this.onEnd()` is called. For multi-sentence responses this fires `onEnd` — and transitions the avatar back to IDLE — after the first sentence finishes, not after the full response ends. The avatar flickers between SPEAKING and IDLE during playback.
+
+**Fix:** Only call `this.onEnd()` when the queue is empty AND no further audio is expected (i.e., a "response complete" flag has been set). Add a boolean field `this.responseComplete = false`. Set it to `true` when the calling code signals that the full Claude response has been processed (all sentences queued). In `_playNextBuffer`, only call `this.onEnd()` when both `audioBufferQueue.length === 0` AND `this.responseComplete === true`. Reset `responseComplete` to `false` on each new generation start.
+
+---
+
+### Bug 2 — AudioPlayer: `playAudioBuffer` catch block leaves `isPlayingAudio` stuck
+
+**File:** `client/src/components/Voice/AudioPlayer.js`
+**Function:** `playAudioBuffer`
+
+**Problem:** When `decodeAudioData` throws (malformed audio chunk), the catch block calls `this.onEnd()` but does NOT reset `this.isPlayingAudio = false`. The player thinks it is still playing, so subsequent calls to `playAudioBuffer` are no-ops. The avatar gets stuck in SPEAKING state with no audio playing.
+
+**Fix:** In the catch block, set `this.isPlayingAudio = false` before calling `this.onEnd()`.
+
+---
+
+### Bug 3 — chat.js: interrupt race with `upsertAssistantMessage`
+
+**File:** `server/routes/chat.js`
+**Endpoint:** `POST /api/chat/interrupt` and the streaming `onComplete` callback
+
+**Problem:** The interrupt endpoint saves a partial message to the database and calls `controller.abort()`. However, the streaming `onComplete` callback also calls `upsertAssistantMessage` after accumulating the full text. Because `activeGenerations.delete(generation_id)` happens after `abort()` is called, the `onComplete` handler can still execute and overwrite the partial save with stale or empty content — or vice versa — depending on timing.
+
+**Fix:** In the interrupt handler, call `activeGenerations.delete(generation_id)` BEFORE calling `controller.abort()`. In the `onComplete` callback, check whether the generation is still registered in `activeGenerations` before writing; if it has been removed (i.e., interrupted), skip the upsert. This ensures only one writer wins.
+
+---
+
+### Bug 4 — MicrophoneManager: stale `enabled` closure restarts mic after disable
+
+**File:** `client/src/components/Voice/MicrophoneManager.jsx`
+**Function:** `startRecognition` → `recognition.onend` handler
+
+**Problem:** `recognition.onend` closes over the `enabled` prop value at `useCallback` creation time. If the user disables the microphone while a recognition restart timer is pending, `onend` fires with the stale `enabled = true` value and calls `recognitionRef.current.start()` on whatever `recognitionRef.current` happens to be — potentially restarting a freshly disabled mic session.
+
+**Fix:** Replace the stale closure check with a ref. Create `const enabledRef = useRef(enabled)` and keep it in sync via `useEffect(() => { enabledRef.current = enabled; }, [enabled])`. Change `recognition.onend` to read `enabledRef.current` instead of `enabled`. Also gate the inner timer callback on `enabledRef.current` instead of `enabled`.
+
+---
+
+### Bug 5 — AudioPlayer: `fadeOut` captures `currentSource` by property ref, not local variable
+
+**File:** `client/src/components/Voice/AudioPlayer.js`
+**Function:** `fadeOut` (or the inline stop-after-fade logic)
+
+**Problem:** The `setTimeout` that stops the audio source after the fade reads `this.currentSource` at callback execution time, not at scheduling time. If a new generation starts within the fade duration (~120 ms), `this.currentSource` will point to the NEW source node. The timeout then stops the new generation's audio mid-sentence.
+
+**Fix:** Capture the source in a local variable before scheduling the timeout:
+```js
+const sourceToStop = this.currentSource;
+setTimeout(() => {
+  try { sourceToStop.stop(); } catch {}
+}, durationMs + 20);
+```
+Do not read `this.currentSource` inside the timeout callback.
+
+---
+
+### Bug 6 — App.jsx: `handleDeleteConversation` never calls the delete API
+
+**File:** `client/src/App.jsx`
+**Function:** `handleDeleteConversation`
+
+**Problem:** The handler removes the conversation from local React state (`setConversations`) but never calls `deleteConversation(id)` from the API service. The conversation is deleted from the UI but persists in the SQLite database and reappears on the next page load.
+
+**Fix:** Call `deleteConversation(id)` (imported from `services/api.js`) inside `handleDeleteConversation` before or after updating local state. Handle the async call with `.catch()` to log errors without crashing the UI.
+
+---
+
+### Bug 7 — ttsWebSocket.js: ElevenLabs `tts_end` never resolves the pending promise
+
+**File:** `client/src/services/ttsWebSocket.js`
+**Function:** WebSocket `onmessage` handler
+
+**Problem:** The `pendingRequests` map stores a `{ resolve, reject }` pair per request. The `tts_use_browser` and `tts_error` message types correctly resolve/reject and delete the entry. But the ElevenLabs success path sends `tts_start`, a binary audio chunk, then `tts_end` — and `tts_end` is never handled. The promise for every ElevenLabs TTS request therefore sits unresolved until it hits a 5-second timeout, causing a noticeable delay before audio plays and unnecessary timeout errors in the console.
+
+**Fix:** Add a `tts_end` handler in the `onmessage` switch/if-chain:
+```js
+} else if (msg.type === 'tts_end') {
+  const pending = pendingRequests.get(msg.request_id);
+  if (pending) {
+    pending.resolve({ mode: 'elevenlabs', request_id: msg.request_id });
+    pendingRequests.delete(msg.request_id);
+  }
+}
+```
+
+---
+
+### Bug 8 — AudioPlayer: `speakBrowser` fires `onEnd` per utterance for multi-sentence responses
+
+**File:** `client/src/components/Voice/AudioPlayer.js`
+**Function:** `speakBrowser` (browser TTS fallback path)
+
+**Problem:** Each `SpeechSynthesisUtterance` has its own `onend` callback that calls `this.onEnd()` whenever the utterance finishes. For multi-sentence responses, this fires `onEnd` (and transitions the avatar to IDLE) after every sentence, not after the last one.
+
+**Fix:** Apply the same `responseComplete` flag approach as Bug 1. Only call `this.onEnd()` in `utterance.onend` when the browser TTS utterance queue is fully drained AND `this.responseComplete === true`. Alternatively, maintain a counter of queued utterances, decrement on each `onend`, and only call `this.onEnd()` when the counter reaches zero AND the response is complete.
+
+---
+
+### Bug 9 — claude.js: `buildMessages` can produce consecutive assistant turns after summary injection
+
+**File:** `server/services/claude.js`
+**Function:** `buildMessages` (or equivalent message-construction function)
+
+**Problem:** When a conversation summary exists, the code prepends a synthetic `[user, assistant]` pair to provide context. If the first real message in `msgs` is also an `assistant` turn, the resulting array has two consecutive `assistant` roles, which the Claude API rejects with a 400 error.
+
+**Fix:** After prepending the summary pair, check if `msgs[0].role === 'assistant'`. If so, insert a neutral user message (e.g., `{ role: 'user', content: '...' }`) between the injected assistant turn and the first real message, OR merge the summary into the existing first user message instead of prepending a separate pair.
+
+---
+
+### Bug 10 — `model_id` not forwarded from client to server on each chat request
+
+**Files:**
+- `client/src/services/api.js` — function `streamMessage`
+- `client/src/context/PipelineContext.jsx` — function `sendMessage`
+
+**Problem:** The server's `/api/chat/stream` route accepts an optional `model_id` in the POST body to use a specific model for that request. However:
+1. `PipelineContext.sendMessage` receives a `modelId` parameter but does not pass it to `streamMessage`.
+2. `api.js:streamMessage` never includes `model_id` in the POST body it sends.
+
+As a result the server always falls back to reading `active_model` from the database, which creates a race condition: if the WebSocket `model_switch` message and the HTTP chat request arrive in the same tick, the DB may not yet reflect the new model. The `scope: 'this_conversation'` model override is effectively broken.
+
+**Fix:**
+1. In `api.js`, add `model_id` as an optional parameter to `streamMessage` and include it in the JSON body:
+   ```js
+   body: JSON.stringify({ text, conversation_id, generation_id, model_id }),
+   ```
+2. In `PipelineContext.jsx`, pass `modelId` (mapped to `model_id`) when calling `streamMessage`:
+   ```js
+   streamRef.current = streamMessage({
+     text,
+     conversationId: convId,
+     generationId: genId,
+     modelId,   // ← add this
+     onEvent: ...
+   });
+   ```
+3. In `server/routes/chat.js`, ensure the extracted `model_id` from `req.body` is passed to the Claude service call, taking precedence over the DB value.
+
+---
+
+**Implementation notes for the autonomous agent:**
+- Fix all 10 bugs above. Each fix is self-contained and should not require architectural changes.
+- After fixing, re-run the full Puppeteer verification suite to confirm no regressions.
+- Commit each logical group of fixes together with a clear message (e.g., `fix: AudioPlayer premature onEnd between sentences (#1, #8)`).
+- Update `feature_list.json` to mark the bug-fix work as complete and update `claude-progress.txt`.

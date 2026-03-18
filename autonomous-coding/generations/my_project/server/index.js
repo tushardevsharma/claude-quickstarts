@@ -213,7 +213,7 @@ app.get('/api/health', (req, res) => {
 });
 
 // Start server
-httpServer.listen(PORT, () => {
+httpServer.listen(PORT, '127.0.0.1', () => {
   console.log(`[Server] Digital Human Companion running on port ${PORT}`);
   console.log(`[Server] Health: http://localhost:${PORT}/api/health`);
   console.log(`[Server] WebSocket: ws://localhost:${PORT}/ws`);
