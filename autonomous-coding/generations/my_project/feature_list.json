@@ -1,7 +1,7 @@
 {
   "project": "Digital Human AI Companion",
   "description": "Browser-based AI companion with 2D animated talking avatar, voice I/O, and persistent memory",
-  "spec_checksum": "ae9c1fadd9b31c78559953e9d0e57f5ba15d21e84f4b4f124276d12d307d8bb8",
+  "spec_checksum": "7cc94cff54263b067fb6f83d46459dc8b8a1da96b8ad14aca7723c1cb0c50e97",
   "features": [
     {
       "id": 1,
@@ -1454,6 +1454,204 @@
         "Check network tab to confirm TTS requests for subsequent sentences begin before prior audio finishes"
       ],
       "passes": true
+    },
+    {
+      "id": 101,
+      "category": "Bug Fixes",
+      "name": "Bug 1 — AudioPlayer: No Premature onEnd Between Sentences",
+      "description": "AudioPlayer._playNextBuffer must only call onEnd when the queue is empty AND a 'responseComplete' flag is true, preventing the avatar from flickering back to IDLE between sentences of a multi-sentence response",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Send a message that produces a 3+ sentence response",
+        "Observe the avatar state indicator throughout the full response",
+        "Verify the avatar stays in 'Speaking' state continuously — it does NOT flicker to 'Idle' between sentences",
+        "Verify onEnd / avatar IDLE transition fires only after the very last sentence finishes"
+      ],
+      "passes": false
+    },
+    {
+      "id": 102,
+      "category": "Bug Fixes",
+      "name": "Bug 2 — AudioPlayer: isPlayingAudio Reset on DecodeAudioData Error",
+      "description": "When decodeAudioData throws, the catch block must set isPlayingAudio=false before calling onEnd so subsequent playAudioBuffer calls are not silently dropped and the avatar does not get stuck in SPEAKING state",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Simulate a malformed audio chunk reaching AudioPlayer (e.g., via a test hook or DevTools network intercept returning corrupted binary)",
+        "Verify the avatar does NOT get stuck in 'Speaking' state after the error",
+        "Verify subsequent TTS audio plays normally after the error",
+        "Verify no 'stuck Speaking' state persists in the UI"
+      ],
+      "passes": false
+    },
+    {
+      "id": 103,
+      "category": "Bug Fixes",
+      "name": "Bug 3 — chat.js: Interrupt Does Not Overwrite Partial Save via Race Condition",
+      "description": "The interrupt handler must call activeGenerations.delete(generation_id) BEFORE controller.abort() so the streaming onComplete callback skips its upsert when the generation has been interrupted, ensuring only one writer wins",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Enable microphone",
+        "Send a long message; interrupt mid-sentence by speaking",
+        "Query GET /api/conversations/:id to retrieve the interrupted assistant message",
+        "Verify the stored content is the partial text that was actually spoken — not an empty string or the full unspoken text",
+        "Verify was_interrupted is 1 on that message",
+        "Repeat 5 times to confirm the race condition is gone"
+      ],
+      "passes": false
+    },
+    {
+      "id": 104,
+      "category": "Bug Fixes",
+      "name": "Bug 4 — MicrophoneManager: Disabled Mic Does Not Restart via Stale Closure",
+      "description": "recognition.onend must read enabled state from a ref (enabledRef.current) rather than the stale prop closure so that disabling the mic while a restart timer is pending does not re-start the mic",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Enable microphone",
+        "Immediately click the mic button to disable it while it is starting",
+        "Wait 2 seconds",
+        "Verify the mic does NOT re-activate on its own",
+        "Verify the mic icon remains in the disabled/muted state",
+        "Verify no spurious 'Listening...' state appears"
+      ],
+      "passes": false
+    },
+    {
+      "id": 105,
+      "category": "Bug Fixes",
+      "name": "Bug 5 — AudioPlayer: fadeOut Does Not Stop New Generation's Audio",
+      "description": "The setTimeout in fadeOut must capture this.currentSource in a local variable at scheduling time; reading this.currentSource inside the callback must be removed so a new generation started within the 120ms fade window is not stopped prematurely",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Enable microphone",
+        "Start a response and immediately interrupt it",
+        "Speak a new message while the ~120ms fade is still in progress",
+        "Verify the new response audio plays fully — the fade from the prior interrupt does NOT cut off the new generation mid-sentence",
+        "Repeat 3 times to confirm"
+      ],
+      "passes": false
+    },
+    {
+      "id": 106,
+      "category": "Bug Fixes",
+      "name": "Bug 6 — handleDeleteConversation Calls the Delete API",
+      "description": "App.jsx handleDeleteConversation must call deleteConversation(id) from services/api.js (making the DELETE /api/conversations/:id request) before or after updating local React state, so deleted conversations do not reappear on page reload",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Create a conversation with a distinctive message",
+        "Open the sidebar and delete that conversation",
+        "Reload the page (F5)",
+        "Verify the deleted conversation does NOT reappear in the sidebar",
+        "Verify GET /api/conversations no longer includes the deleted conversation id"
+      ],
+      "passes": false
+    },
+    {
+      "id": 107,
+      "category": "Bug Fixes",
+      "name": "Bug 7 — ttsWebSocket: tts_end Resolves the Pending Promise",
+      "description": "The WebSocket onmessage handler must handle the 'tts_end' message type by resolving and deleting the corresponding pendingRequests entry so ElevenLabs TTS requests resolve promptly instead of waiting for a 5-second timeout",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Open browser DevTools → Performance or Console",
+        "Send a message and observe time from response text appearing to audio starting",
+        "Verify audio begins within ~500ms of the first TTS sentence being ready — NOT after a 5-second timeout delay",
+        "Verify no 'TTS timeout' or unresolved promise errors appear in the console",
+        "Verify smooth audio playback without a 5s initial pause"
+      ],
+      "passes": false
+    },
+    {
+      "id": 108,
+      "category": "Bug Fixes",
+      "name": "Bug 8 — AudioPlayer: speakBrowser Does Not Fire onEnd Per Utterance",
+      "description": "In the browser TTS fallback path, onEnd must only be called when the last utterance in the queue finishes AND responseComplete is true, not after every individual utterance in a multi-sentence response",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Configure the app to use browser TTS fallback (disable ElevenLabs in settings or env)",
+        "Send a message that produces a 3+ sentence response",
+        "Observe the avatar state indicator",
+        "Verify the avatar stays in 'Speaking' state for all sentences — it does NOT flicker to 'Idle' between utterances",
+        "Verify 'Idle' transition fires only after the final utterance completes"
+      ],
+      "passes": false
+    },
+    {
+      "id": 109,
+      "category": "Bug Fixes",
+      "name": "Bug 9 — claude.js: buildMessages Does Not Produce Consecutive Assistant Turns After Summary Injection",
+      "description": "When a conversation summary is prepended as a synthetic [user, assistant] pair, buildMessages must ensure the first real message in the history is not also an assistant turn; if it is, a neutral user message is inserted or the summary is merged to prevent a 400 'consecutive assistant turns' error from the Claude API",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Send 55+ messages in a single conversation to trigger periodic summary generation",
+        "After the summary is generated, continue sending messages",
+        "Verify no 400 API error appears in the console or UI",
+        "Verify Claude responds normally to all messages after the summary is injected",
+        "Check server logs confirm the Claude API call succeeds without a 'consecutive assistant turns' validation error"
+      ],
+      "passes": false
+    },
+    {
+      "id": 110,
+      "category": "Bug Fixes",
+      "name": "Bug 10 — model_id Forwarded from Client to Server on Each Chat Request",
+      "description": "api.js streamMessage must include model_id in the POST body, and PipelineContext.sendMessage must pass modelId to streamMessage, so the server uses the correct model immediately without relying on a potentially-stale DB value — fixing the scope:'this_conversation' race condition",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Open browser DevTools → Network",
+        "Switch model to Opus via settings (scope: this conversation)",
+        "Send a message immediately after switching",
+        "Inspect the POST /api/chat/stream request body",
+        "Verify the request body contains model_id: 'claude-opus-4-6'",
+        "Verify the response is generated by Opus (check model badge in transcript)",
+        "Verify the model switch takes effect on the very first message after switching, not after a delay"
+      ],
+      "passes": false
+    },
+    {
+      "id": 111,
+      "category": "Voice Input",
+      "name": "STT Interim Results Display ('I heard: ...')",
+      "description": "While waiting for the final STT transcript, the UI shows interim Deepgram results as an 'I heard: ...' preview so the user knows they were understood before the full transcript is finalized",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Enable microphone",
+        "Speak a sentence slowly",
+        "Observe the transcript or state indicator area while speaking",
+        "Verify partial/interim words appear as an 'I heard: ...' preview before the final transcript is confirmed",
+        "Verify the preview updates as more words are recognised",
+        "Verify the final confirmed transcript replaces the preview once Deepgram sends is_final"
+      ],
+      "passes": false
+    },
+    {
+      "id": 112,
+      "category": "Error Handling",
+      "name": "Self-Imposed Rate Limiting (Max Messages Per Minute)",
+      "description": "The backend enforces a configurable maximum number of messages per minute to prevent runaway API costs; requests exceeding the limit are queued or rejected with a user-facing message",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Send messages rapidly in succession, exceeding the configured rate limit",
+        "Verify the backend does not forward all requests to Claude simultaneously",
+        "Verify a rate-limit message or queuing indicator appears in the UI when the limit is hit",
+        "Verify the rate limit threshold is configurable via server config / .env",
+        "Verify normal operation resumes after the rate window resets"
+      ],
+      "passes": false
+    },
+    {
+      "id": 113,
+      "category": "Security",
+      "name": "XSS Sanitization — No dangerouslySetInnerHTML on User or Claude Content",
+      "description": "All user messages and Claude response text are rendered using React's built-in escaping; dangerouslySetInnerHTML is never used for untrusted content, preventing XSS attacks via crafted messages",
+      "steps": [
+        "Navigate to http://localhost:5173",
+        "Send a message containing an XSS payload, e.g.: <img src=x onerror=alert('xss')>",
+        "Verify the payload is rendered as literal escaped text in the transcript — the image tag is NOT inserted into the DOM",
+        "Verify no alert dialog appears",
+        "Search the client source for 'dangerouslySetInnerHTML' and verify it is not used on any component that renders user or Claude content",
+        "Repeat with a <script>alert('xss')</script> payload and verify same safe rendering"
+      ],
+      "passes": false
     }
   ]
 }
