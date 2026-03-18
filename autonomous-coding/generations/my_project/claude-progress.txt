@@ -1,7 +1,44 @@
 Digital Human AI Companion — Build Progress
 ============================================
-Date: 2026-03-18 (Sessions 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26 update)
+Date: 2026-03-18 (Sessions 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27 update)
 Build Agent: Claude (Autonomous Coding Agent)
+
+SESSION 27 WORK (2026-03-18) — SPEC SYNC ONLY
+-----------------------------------------------
+Spec-sync session. No feature implementation. No test verification.
+
+WHAT CHANGED:
+- app_spec.txt was updated (checksum changed from ae9c1fadd9b3... to 7cc94cff5426...)
+- The primary new addition is Section 17 "Known Bugs — Mandatory Fixes" listing 10
+  confirmed bugs with exact file/function locations and required fixes.
+- Two additional spec requirements not previously tracked were also identified.
+
+NEW FEATURES ADDED TO feature_list.json: 13 total (IDs 101–113)
+
+From Section 17 (new section — Known Bugs, 10 entries):
+  101 — Bug 1: AudioPlayer premature onEnd between sentences (avatar flickers SPEAKING→IDLE)
+  102 — Bug 2: AudioPlayer isPlayingAudio stuck after decodeAudioData error
+  103 — Bug 3: chat.js interrupt race condition overwrites partial DB save
+  104 — Bug 4: MicrophoneManager stale enabled closure restarts mic after disable
+  105 — Bug 5: AudioPlayer fadeOut stops new generation's audio source
+  106 — Bug 6: handleDeleteConversation never calls the delete API (reappears on reload)
+  107 — Bug 7: ttsWebSocket tts_end never resolves pending promise (5s delay)
+  108 — Bug 8: speakBrowser fires onEnd per utterance in browser TTS fallback
+  109 — Bug 9: buildMessages consecutive assistant turns after summary injection (400 error)
+  110 — Bug 10: model_id not forwarded from client to server on chat requests
+
+From Section 6.2 Latency Optimizations (1 entry):
+  111 — STT interim results display ("I heard: ..." preview while waiting for final transcript)
+
+From Section 14 Security Considerations (2 entries):
+  112 — Self-imposed rate limiting (max N messages/minute, configurable)
+  113 — XSS sanitization: no dangerouslySetInnerHTML on user or Claude content
+
+SPEC CHECKSUM UPDATED:
+  Old: ae9c1fadd9b31c78559953e9d0e57f5ba15d21e84f4b4f124276d12d307d8bb8
+  New: 7cc94cff54263b067fb6f83d46459dc8b8a1da96b8ad14aca7723c1cb0c50e97
+
+All 13 new entries have passes: false. No existing entries were modified.
 
 SESSION 26 WORK (2026-03-18)
 -----------------------------
